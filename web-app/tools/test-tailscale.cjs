@@ -83,6 +83,15 @@ test('remote management toggles exactly and reports off/starting/pending/active/
   assert.equal(remoteAccessState({ ...base, remote_access: true, lan_cidr: null }), 'error')
 })
 
+test('site route sends only the requested subnet and current revision', () => {
+  const { tailscaleUpdate } = load('../src/features/proxy/tailscaleModel.ts')
+  const base = { ...fixture, revision: 11 }
+  assert.deepEqual(plain(tailscaleUpdate(base, 'site_route', '', undefined, '10.203.44.0/24')),
+    { expected_revision: 11, action: 'site_route', site_cidr: '10.203.44.0/24' })
+  assert.deepEqual(plain(tailscaleUpdate(base, 'site_route')),
+    { expected_revision: 11, action: 'site_route', site_cidr: '' })
+})
+
 test('remote SSH toggles exactly and reports off/idle/no_service/active/unknown', () => {
   const { tailscaleUpdate, remoteSshState, tailnetIpv4 } = load('../src/features/proxy/tailscaleModel.ts')
   const base = { ...fixture, revision: 4, backend_state: 'Running', ssh_service: true }

@@ -3,6 +3,17 @@ import type { Dict } from '.'
 // Proxy page: backend selector; Clash overview, diagnostics, subscriptions, nodes, devices,
 // connections, logs, advanced settings and core updates. WireGuard's settings are in network.ts.
 export default {
+  'Enable site subnet route?': '开启站点子网路由？',
+  'Disable site subnet route?': '关闭站点子网路由？',
+  'Tailscale will accept all approved tailnet subnets. The selected subnet bypasses the internet proxy; check for overlapping networks before continuing.': 'Tailscale 将接收此 Tailnet 所有已批准的子网路由。所选子网将绕过上网代理；继续前请检查网段是否重叠。',
+  'Devices will no longer use this site route. Active connections may be interrupted.': '设备将不再使用此站点路由，现有连接可能中断。',
+  'Site-to-site subnet route': '站点互联（访问远端子网）',
+  'Route a remote private IPv4 subnet through Tailscale while Clash or WireGuard handles internet traffic. Approve the subnet on the remote router first.': '将远端私有 IPv4 子网经 Tailscale 访问，上网流量仍可由 Clash 或 WireGuard 处理。请先批准远端路由器公布的子网。',
+  'Tailscale accepts all approved subnet routes. The selected subnet bypasses the internet proxy. While the policy is active, a missing Tailscale route is blocked; early boot and firewall reload are not protected. Direct connections can fall back to a relay.': 'Tailscale 会接收所有已批准的子网路由。所选子网绕过上网代理；策略生效期间路由消失会阻断该访问，但开机初期和防火墙重载期间不受保护。直连不可用时可能使用中继。',
+  'Remote site IPv4 subnet': '远端站点 IPv4 子网',
+  'Route acceptance': '接收子网路由',
+  'Disable site route': '关闭站点互联',
+  'Enable site route': '开启站点互联',
   // Integrated Tailscale settings, using the existing authenticated agent.
   'Choose WireGuard, Clash or Tailscale and configure each': '选择 WireGuard、Clash 或 Tailscale，并分别进行配置',
   'Activate {name}?': '确定启用 {name}？',

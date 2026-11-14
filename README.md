@@ -72,7 +72,8 @@ bash install.sh               # 安装；加 --with-tailscale 同时安装 Tails
     规则 / 全局 / 直连，按设备分流，连接和日志查看。见 [Clash 文档](docs/CLASH.md)。
   - **WireGuard**：导入服务商的 `.conf`，保存多个配置，所有设备或指定设备走隧道。见 [WireGuard 文档](docs/WIREGUARD.md)。
   - **Tailscale**（`--with-tailscale`）：在网页上用登录链接或认证密钥登录、退出；Tailscale 模式（经出口节点上网）；
-    **远程管理**（子网路由，在任何地方通过 tailnet 访问路由器和局域网，可与 Clash / WireGuard 同时使用）。
+    **远程管理**（子网路由，在任何地方通过 tailnet 访问路由器和局域网，可与 Clash / WireGuard 同时使用）；
+    可选的**站点互联**允许局域网访问对端已批准的私有 IPv4 子网，同时保留上网代理。见 [Tailscale 站点互联说明](docs/TAILSCALE-SITE.zh.md)。
 - **无线中继**：连上已有的 Wi-Fi（家里、酒店、办公室）当作上网通道，省下蜂窝流量；上游断开或不能上网时自动回到蜂窝网络。
   可保存 8 个网络按顺序连接，支持需要网页认证的热点。
   本分支为规避已观测到的 AP/STA 冲突，中继时由守护暂停与上游同频段的热点，保留另一频段；这是当前策略，不是对所有固件或硬件能力的绝对结论。守护会提交 UCI，并在 `/data` 留持久恢复标记；开启前准备另一频段或 USB 备用管理通道。

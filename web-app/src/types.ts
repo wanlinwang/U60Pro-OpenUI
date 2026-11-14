@@ -502,6 +502,9 @@ export interface TailscaleStatus {
   error: string | null
   /** Remote management: subnet route for the LAN (newer agents only). */
   remote_access?: boolean
+  /** Explicit IPv4 site subnet; absent on upstream agents. */
+  site_cidr?: string
+  accept_routes?: boolean | null
   lan_cidr?: string | null
   lan_ip?: string | null
   advertised_routes?: string[]
@@ -522,6 +525,7 @@ export type TailscaleUpdate =
   | { expected_revision: number; action: 'connect' | 'disconnect' | 'cancel_login' | 'logout' }
   | { expected_revision: number; action: 'login'; hostname?: string; auth_key?: string }
   | { expected_revision: number; action: 'select_exit'; exit_node: string }
+  | { expected_revision: number; action: 'site_route'; site_cidr: string }
   | { expected_revision: number; action: 'remote_access' | 'remote_ssh'; enabled: boolean }
 
 export interface WireGuardProfile {

@@ -5,6 +5,14 @@ import type { Dict } from '.'
 // Patterns are tried in file order: composite "{error}; …" rollbacks come first so a
 // leading pattern elsewhere cannot swallow their tail.
 export default {
+  'Saved Tailscale site route is invalid': '已保存的 Tailscale 站点路由无效',
+  'Site subnet must be a canonical private IPv4 CIDR': '站点子网必须是规范的私有 IPv4 网段',
+  'The site subnet is not an approved peer route': '该站点子网不是已批准的对端路由',
+  'Site subnet overlaps a connected network': '站点子网与本机直连网络重叠',
+  'Cannot inspect connected IPv4 networks': '无法检查本机直连 IPv4 网络',
+  'Disable the site route before remote management': '请先关闭站点互联，再关闭远程管理',
+  'Disable the site route before selecting an exit node': '请先关闭站点互联，再选择出口节点',
+  'Site routing requires remote management and no exit node': '站点互联需要开启远程管理，且不能选择出口节点',
   'Timed out reaching the agent': '连接 Agent 超时',
   'Failed to reach the agent at {url}': '无法连接 Agent（{url}）',
   'Invalid response from agent ({status})': 'Agent 返回了无效响应（{status}）',

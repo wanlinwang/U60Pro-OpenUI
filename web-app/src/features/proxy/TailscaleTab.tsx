@@ -13,7 +13,7 @@ import { eligibleExitNodes, remoteAccessState, remoteSshState, setupStage, tailn
 const ADMIN = 'https://login.tailscale.com/admin/machines'
 
 /** Asked before changes that move traffic or end access; sign-in itself changes nothing yet. */
-function ask(status: TailscaleStatus, action: TailscaleUpdate['action'], exit = '') {
+function ask(status: TailscaleStatus, action: TailscaleUpdate['action'], exit = '', site = '') {
   if (action === 'login' || action === 'cancel_login') return Promise.resolve(true)
   if (action === 'logout') return confirm({
     title: t('Sign out of Tailscale?'),
@@ -32,6 +32,14 @@ function ask(status: TailscaleStatus, action: TailscaleUpdate['action'], exit = 
       danger: !on,
     })
   }
+  if (action === 'site_route') return confirm({
+    title: site ? t('Enable site subnet route?') : t('Disable site subnet route?'),
+    body: site
+      ? t('Tailscale will accept all approved tailnet subnets. The selected subnet bypasses the internet proxy; check for overlapping networks before continuing.')
+      : t('Devices will no longer use this site route. Active connections may be interrupted.'),
+    confirmLabel: t('Confirm'),
+    danger: !site,
+  })
   const remoteOn = action === 'remote_access' && !status.remote_access
   return confirm(action === 'remote_access' ? {
     title: remoteOn ? t('Turn on remote management?') : t('Turn off remote management?'),
@@ -59,6 +67,7 @@ export default function TailscaleTab() {
   const [status, setStatus] = useState<TailscaleStatus | null>(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState('')
+  const [siteDraft, setSiteDraft] = useState('')
   const [working, setWorking] = useState<TailscaleUpdate['action'] | null>(null)
   const [method, setMethod] = useState<'browser' | 'key'>('browser')
   const [signIn, setSignIn] = useState<SignIn>({ hostname: '', authKey: '' })
@@ -66,6 +75,7 @@ export default function TailscaleTab() {
   const generation = useRef(0)
   const busy = useRef(false)
   const dirty = useRef(false)
+  const siteDirty = useRef(false)
 
   const refresh = useCallback(async () => {
     if (busy.current) return
@@ -75,6 +85,7 @@ export default function TailscaleTab() {
       if (!mounted.current || busy.current || current !== generation.current) return
       setStatus(next); setError('')
       if (!dirty.current) setSelected(next.selected_exit_node)
+      if (!siteDirty.current) setSiteDraft(next.site_cidr ?? '')
     } catch (e) {
       if (!mounted.current || current !== generation.current) return
       setError(e instanceof ApiError && e.status === 404 ? t('This agent does not support Tailscale.') : e instanceof Error ? e.message : t('Unable to load Tailscale'))
@@ -96,18 +107,19 @@ export default function TailscaleTab() {
     return () => window.clearInterval(timer)
   }, [signingIn, refresh])
 
-  const mutate = async (action: TailscaleUpdate['action'], login?: SignIn) => {
+  const mutate = async (action: TailscaleUpdate['action'], login?: SignIn, site = '') => {
     if (!status || busy.current || pending || settingsBusy || error) return
     // Hold a local guard while the standard confirmation dialog is open, too.
     busy.current = true
-    const accepted = await ask(status, action, selected)
+    const accepted = await ask(status, action, selected, site)
     if (!accepted || !mounted.current || !beginSettingsUpdate()) { busy.current = false; return }
     generation.current += 1
     setWorking(action)
     try {
-      const next = await api.tailscaleSet(tailscaleUpdate(status, action, selected, login))
+      const next = await api.tailscaleSet(tailscaleUpdate(status, action, selected, login, site))
       if (mounted.current) {
         dirty.current = false; setStatus(next); setSelected(next.selected_exit_node); setError('')
+        if (action === 'site_route') { siteDirty.current = false; setSiteDraft(next.site_cidr ?? '') }
         // The key is used once; never keep it in the form.
         if (action === 'login') setSignIn(v => ({ ...v, authKey: '' }))
       }
@@ -218,6 +230,19 @@ export default function TailscaleTab() {
           </Button>
           <p className="text-xs text-ink3">{t('Signing in changes nothing for your devices: Tailscale DNS and other devices’ routes stay off until you choose a use above.')}</p>
         </>}
+      </div>
+    </Card>}
+    {status?.site_cidr !== undefined && signedIn && <Card title={t('Site-to-site subnet route')}>
+      <div className="space-y-3">
+        <p className="text-[13px] text-ink2">{t('Route a remote private IPv4 subnet through Tailscale while Clash or WireGuard handles internet traffic. Approve the subnet on the remote router first.')}</p>
+        <p className="text-xs text-ink3">{t('Tailscale accepts all approved subnet routes. The selected subnet bypasses the internet proxy. While the policy is active, a missing Tailscale route is blocked; early boot and firewall reload are not protected. Direct connections can fall back to a relay.')}</p>
+        <Field label={t('Remote site IPv4 subnet')}>
+          <Input value={siteDraft} disabled={blocked || !!status.site_cidr} placeholder="10.203.44.0/24" onChange={event => { siteDirty.current = true; setSiteDraft(event.target.value) }} />
+        </Field>
+        <p className="text-xs text-ink3">{t('Route acceptance')}: {status.accept_routes === true ? t('Yes') : t('No')}</p>
+        <Button variant={status.site_cidr ? 'danger' : 'primary'} disabled={blocked || (!status.site_cidr && (!status.remote_access || !!status.selected_exit_node || !siteDraft.trim()))} loading={working === 'site_route'} onClick={() => void mutate('site_route', undefined, status.site_cidr ? '' : siteDraft.trim())}>
+          {status.site_cidr ? t('Disable site route') : t('Enable site route')}
+        </Button>
       </div>
     </Card>}
     <Card title={t('Tailscale')} action={status ? <Chip tone={status.error ? 'danger' : running ? 'ok' : 'default'}>{status.enabled ? t('On') : status.remote_access && status.backend_state === 'Running' ? t('Remote management only') : t('Off')}</Chip> : undefined}>

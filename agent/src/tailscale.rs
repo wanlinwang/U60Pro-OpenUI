@@ -49,6 +49,10 @@ struct Settings {
     /// Remote management: keep tailscaled up advertising the LAN as a subnet route, so
     /// tailnet devices reach 192.168.0.1 (SSH, OpenUI) even with Clash or WireGuard on.
     remote_access: bool,
+    /// Explicit remote LAN destination; empty preserves the upstream behaviour.
+    /// Omit the empty value so an old agent can still read a disabled setting.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    site_cidr: String,
 }
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
@@ -66,6 +70,10 @@ enum Update {
     RemoteAccess {
         expected_revision: u64,
         enabled: bool,
+    },
+    SiteRoute {
+        expected_revision: u64,
+        site_cidr: String,
     },
     /// SSH on this router's tailnet address: tailscaled forwards TCP 22 to the local-only
     /// dropbear, which itself is left as it is.
@@ -97,6 +105,9 @@ impl Update {
                 expected_revision, ..
             }
             | Self::RemoteAccess {
+                expected_revision, ..
+            }
+            | Self::SiteRoute {
                 expected_revision, ..
             }
             | Self::RemoteSsh {
@@ -228,6 +239,13 @@ fn load() -> Result<Settings, String> {
             if !s.exit_node.is_empty() && !stable_id(&s.exit_node) {
                 return Err("Saved Tailscale exit node is invalid".into());
             }
+            if !s.site_cidr.is_empty()
+                && (private_lan_cidr(&s.site_cidr).as_deref() != Some(&s.site_cidr)
+                    || !s.remote_access
+                    || !s.exit_node.is_empty())
+            {
+                return Err("Saved Tailscale site route is invalid".into());
+            }
             Ok(s)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
@@ -293,11 +311,11 @@ fn advertised(p: &Value) -> Option<Vec<String>> {
     out.sort();
     Some(out)
 }
-fn patch(running: bool, exit: &str, routes: &[String]) -> Result<(), String> {
+fn patch(running: bool, exit: &str, routes: &[String], accept_routes: bool) -> Result<(), String> {
     // MaskedPrefs: explicit Set bits are required by tailscaled's local API.
     let body = json!({"WantRunning":running,"WantRunningSet":true,
         "AdvertiseRoutes":routes,"AdvertiseRoutesSet":true,
-        "CorpDNS":accept_dns(running, exit),"CorpDNSSet":true,"RouteAll":false,"RouteAllSet":true,
+        "CorpDNS":accept_dns(running, exit),"CorpDNSSet":true,"RouteAll":running && accept_routes,"RouteAllSet":true,
         "ExitNodeID":exit,"ExitNodeIDSet":true,"ExitNodeIP":"","ExitNodeIPSet":true,
         "ExitNodeAllowLANAccess":true,"ExitNodeAllowLANAccessSet":true});
     let (code, _) = clash_ctl::request_with_host(
@@ -493,11 +511,11 @@ fn enrolled(v: &Value) -> bool {
     matches!(v["BackendState"].as_str(), Some("Running" | "Stopped"))
         && v["Self"]["ID"].as_str().is_some_and(stable_id)
 }
-fn verify(p: &Value, running: bool, exit: &str, routes: &[String]) -> bool {
+fn verify(p: &Value, running: bool, exit: &str, routes: &[String], accept_routes: bool) -> bool {
     p["WantRunning"].as_bool() == Some(running)
         && advertised(p).as_deref() == Some(routes)
         && p["CorpDNS"].as_bool() == Some(accept_dns(running, exit))
-        && p["RouteAll"].as_bool() == Some(false)
+        && p["RouteAll"].as_bool() == Some(running && accept_routes)
         && p["ExitNodeID"].as_str().unwrap_or("") == exit
         && p["ExitNodeIP"]
             .as_str()
@@ -577,7 +595,7 @@ fn empty_route_table(success: bool, stdout: &[u8], stderr: &[u8]) -> bool {
 }
 const LAN_CHAIN: &str = "OU_TS_LAN4";
 const LAN_OWNER: &str = "openui-tailscale-lan4";
-fn private_lan_cidr(value: &str) -> Option<String> {
+pub(crate) fn private_lan_cidr(value: &str) -> Option<String> {
     let (address, prefix) = value.split_once('/')?;
     let ip: Ipv4Addr = address.parse().ok()?;
     if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_digit()) {
@@ -646,6 +664,71 @@ fn lan_cidr() -> Result<String, String> {
     lan_cidr_from_addresses(
         std::str::from_utf8(&out.stdout).map_err(|_| "Invalid br-lan address response")?,
     )
+}
+fn overlaps(a: &str, b: &str) -> bool {
+    fn network(s: &str) -> Option<(u32, u8)> {
+        let (addr, bits) = s.split_once('/')?;
+        Some((
+            u32::from(addr.parse::<Ipv4Addr>().ok()?),
+            bits.parse::<u8>().ok()?,
+        ))
+    }
+    match (network(a), network(b)) {
+        (Some((a, ap)), Some((b, bp))) if ap <= 32 && bp <= 32 => {
+            let bits = ap.min(bp);
+            let mask = if bits == 0 {
+                0
+            } else {
+                u32::MAX << (32 - bits)
+            };
+            a & mask == b & mask
+        }
+        _ => true,
+    }
+}
+fn peer_has_route(cidr: &str, v: &Value) -> bool {
+    v["Peer"]
+        .as_object()
+        .into_iter()
+        .flat_map(|peers| peers.values())
+        .any(|peer| {
+            peer["PrimaryRoutes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|r| r.as_str() == Some(cidr))
+        })
+}
+fn check_site(cidr: &str, v: &Value) -> Result<(), String> {
+    if private_lan_cidr(cidr).as_deref() != Some(cidr) {
+        return Err("Site subnet must be a canonical private IPv4 CIDR".into());
+    }
+    if !peer_has_route(cidr, v) {
+        return Err("The site subnet is not an approved peer route".into());
+    }
+    let out = Command::new("ip")
+        .args([
+            "-o", "-4", "route", "show", "table", "main", "scope", "link",
+        ])
+        .bounded_output()
+        .map_err(|_| "Cannot inspect connected IPv4 networks")?;
+    if !out.status.success() {
+        return Err("Cannot inspect connected IPv4 networks".into());
+    }
+    let text = std::str::from_utf8(&out.stdout).map_err(|_| "Invalid connected route output")?;
+    for net in text
+        .lines()
+        .filter_map(|line| line.split_ascii_whitespace().next())
+    {
+        if net.contains('/') && overlaps(cidr, net) {
+            return Err("Site subnet overlaps a connected network".into());
+        }
+    }
+    Ok(())
+}
+/// Read under the transition lock when composing the proxy's policy.
+pub(crate) fn site_cidr() -> Option<String> {
+    load().ok().map(|s| s.site_cidr).filter(|s| !s.is_empty())
 }
 fn lan_nat_rules(cidr: &str) -> Vec<Vec<String>> {
     [("POSTROUTING", LAN_CHAIN), (LAN_CHAIN, "MASQUERADE")]
@@ -908,7 +991,7 @@ fn cleanup_then_stop(
     cleaned.and(stopped)
 }
 fn stop_owned_and_daemon() -> Result<(), String> {
-    cleanup_then_stop(cleanup_lan_nat, || patch(false, "", &[]))
+    cleanup_then_stop(cleanup_lan_nat, || patch(false, "", &[], false))
 }
 fn selected_lan_nat(exit: &str) -> Result<(), String> {
     let result = sync_lan_nat(exit);
@@ -985,7 +1068,7 @@ fn verify_dataplane_stopped() -> Result<(), String> {
     verify_lan_mss_absent()
 }
 fn verify_stopped() -> Result<(), String> {
-    if !verify(&prefs()?, false, "", &[]) {
+    if !verify(&prefs()?, false, "", &[], false) {
         return Err("Tailscale did not stop; native activation blocked".into());
     }
     if !matches!(
@@ -999,6 +1082,7 @@ fn verify_stopped() -> Result<(), String> {
 /// Called ONLY with transition lock. Does not take native backend locks.
 pub(crate) fn ensure_down() -> Result<(), String> {
     let mut s = load()?;
+    crate::site_route::reconcile((!s.site_cidr.is_empty()).then_some(s.site_cidr.as_str()))?;
     // Remote access only is not "Tailscale mode": it leaves native backends allowed.
     // Leaving Tailscale mode drops straight to it, without a stop in between.
     if s.remote_access {
@@ -1028,8 +1112,8 @@ pub(crate) fn ensure_down() -> Result<(), String> {
             }
             verify_dataplane_stopped()?;
         } else {
-            if !verify(&prefs()?, false, "", &[]) {
-                patch(false, "", &[])?;
+            if !verify(&prefs()?, false, "", &[], false) {
+                patch(false, "", &[], false)?;
             }
             verify_stopped()?;
         }
@@ -1057,9 +1141,10 @@ fn ensure_remote_only(s: &Settings) -> Result<(), String> {
     }
     cleanup_lan_nat()?;
     let routes = routes(s)?;
-    if !prefs().is_ok_and(|p| verify(&p, true, "", &routes)) {
-        patch(true, "", &routes)?;
-        if !verify(&prefs()?, true, "", &routes) {
+    let accept_routes = !s.site_cidr.is_empty();
+    if !prefs().is_ok_and(|p| verify(&p, true, "", &routes, accept_routes)) {
+        patch(true, "", &routes, accept_routes)?;
+        if !verify(&prefs()?, true, "", &routes, accept_routes) {
             return Err("Tailscale remote access verification failed".into());
         }
     }
@@ -1098,7 +1183,8 @@ pub(crate) fn make_room() -> Result<(), String> {
 }
 pub(crate) fn require_native_allowed() -> Result<(), String> {
     if native_allowed() {
-        Ok(())
+        let s = load()?;
+        crate::site_route::reconcile((!s.site_cidr.is_empty()).then_some(s.site_cidr.as_str()))
     } else {
         Err("Tailscale mode or unverified shutdown blocks native tunnel activation".into())
     }
@@ -1135,8 +1221,10 @@ fn start_selected_inner(s: &Settings) -> Result<(), String> {
         native_off()?;
     }
     let routes = routes(s)?;
-    patch(true, &s.exit_node, &routes)?;
-    if !verify(&prefs()?, true, &s.exit_node, &routes) {
+    crate::site_route::reconcile((!s.site_cidr.is_empty()).then_some(s.site_cidr.as_str()))?;
+    let accept_routes = !s.site_cidr.is_empty();
+    patch(true, &s.exit_node, &routes, accept_routes)?;
+    if !verify(&prefs()?, true, &s.exit_node, &routes, accept_routes) {
         return Err("Tailscale preference verification failed".into());
     }
     sync_lan_nat(&s.exit_node)
@@ -1192,6 +1280,11 @@ fn response() -> Result<Value, String> {
     let lan = lan_cidr().ok();
     let advertised_routes = actual.as_ref().and_then(advertised).unwrap_or_default();
     result["remote_access"] = json!(s.remote_access);
+    result["site_cidr"] = json!(s.site_cidr);
+    result["accept_routes"] = actual
+        .as_ref()
+        .and_then(|p| p["RouteAll"].as_bool())
+        .map_or(Value::Null, |b| json!(b));
     result["lan_cidr"] = json!(lan);
     result["lan_ip"] = json!(lan_ip());
     result["advertised_routes"] = json!(advertised_routes);
@@ -1270,6 +1363,7 @@ pub(crate) fn update_locked(body: &[u8]) -> (u16, Value) {
             Update::SelectExit { .. } => "select exit node",
             Update::RemoteAccess { enabled: true, .. } => "remote access on",
             Update::RemoteAccess { .. } => "remote access off",
+            Update::SiteRoute { .. } => "site route",
             Update::RemoteSsh { enabled: true, .. } => "remote ssh on",
             Update::RemoteSsh { .. } => "remote ssh off",
             Update::Login { auth_key, .. } if !auth_key.is_empty() => "sign in with key",
@@ -1288,6 +1382,9 @@ pub(crate) fn update_locked(body: &[u8]) -> (u16, Value) {
                 ensure_remote_only(&s)?;
             }
             Update::RemoteAccess { enabled, .. } => {
+                if !enabled && !s.site_cidr.is_empty() {
+                    return Err("Disable the site route before remote management".into());
+                }
                 if enabled {
                     if !enrolled(&status()?) {
                         return Err(
@@ -1311,6 +1408,32 @@ pub(crate) fn update_locked(body: &[u8]) -> (u16, Value) {
                     ensure_down()?;
                 }
             }
+            Update::SiteRoute { site_cidr, .. } => {
+                if !site_cidr.is_empty() {
+                    if !s.remote_access || !s.exit_node.is_empty() {
+                        return Err(
+                            "Site routing requires remote management and no exit node".into()
+                        );
+                    }
+                    if !enrolled(&status()?) {
+                        return Err(
+                            "Tailscale is not signed in; sign in on the Tailscale page first"
+                                .into(),
+                        );
+                    }
+                    check_site(&site_cidr, &status()?)?;
+                }
+                s.site_cidr = site_cidr;
+                persist(&s)?;
+                crate::site_route::reconcile(
+                    (!s.site_cidr.is_empty()).then_some(s.site_cidr.as_str()),
+                )?;
+                if s.enabled {
+                    start_selected(&s)?;
+                } else {
+                    ensure_down()?;
+                }
+            }
             Update::RemoteSsh { enabled, .. } => {
                 if enabled && !enrolled(&status()?) {
                     return Err(
@@ -1328,6 +1451,9 @@ pub(crate) fn update_locked(body: &[u8]) -> (u16, Value) {
                 BLOCK_NATIVE.store(false, Ordering::SeqCst);
             }
             Update::SelectExit { exit_node, .. } => {
+                if !exit_node.is_empty() && !s.site_cidr.is_empty() {
+                    return Err("Disable the site route before selecting an exit node".into());
+                }
                 if !exit_node.is_empty()
                     && (!stable_id(&exit_node)
                         || !exits(&status()?).iter().any(|p| p["id"] == exit_node))
@@ -1385,7 +1511,9 @@ pub(crate) fn update_locked(body: &[u8]) -> (u16, Value) {
                 s.enabled = false;
                 s.remote_access = false;
                 s.exit_node.clear();
+                s.site_cidr.clear();
                 persist(&s)?;
+                crate::site_route::reconcile(None)?;
                 *REMOTE_ERROR.lock().unwrap() = None;
                 let cleaned = cleanup_lan_nat();
                 let out = Command::new(cli_path())
@@ -1442,6 +1570,9 @@ pub fn start() {
             {
                 let _transition = crate::transition::lock();
                 let result = load().and_then(|s| {
+                    crate::site_route::reconcile(
+                        (!s.site_cidr.is_empty()).then_some(s.site_cidr.as_str()),
+                    )?;
                     if s.enabled {
                         let exclusive = exclusive(&s);
                         if exclusive {
@@ -1451,7 +1582,9 @@ pub fn start() {
                             || (exclusive
                                 && (wireguard::stored_enabled() || clash::stored_enabled()))
                             || !routes(&s).is_ok_and(|r| {
-                                prefs().is_ok_and(|p| verify(&p, true, &s.exit_node, &r))
+                                prefs().is_ok_and(|p| {
+                                    verify(&p, true, &s.exit_node, &r, !s.site_cidr.is_empty())
+                                })
                             })
                         {
                             start_selected(&s)
@@ -1506,6 +1639,19 @@ pub fn start() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn site_route_requires_exact_peer_route_and_rejects_connected_overlap() {
+        let peers = json!({"Peer":{"peer":{"PrimaryRoutes":["10.203.44.0/24"]}}});
+        assert!(peer_has_route("10.203.44.0/24", &peers));
+        assert!(!peer_has_route("10.203.0.0/16", &peers));
+        assert!(!peer_has_route("10.203.44.0/24", &json!({"Peer":{}})));
+        assert!(overlaps("10.203.44.0/24", "10.203.44.128/25"));
+        assert!(overlaps("10.203.44.0/24", "10.203.0.0/16"));
+        assert!(!overlaps("10.203.44.0/24", "192.168.0.0/24"));
+        assert!(!overlaps("10.203.44.0/24", "10.71.21.192/27"));
+        assert!(overlaps("10.203.44.0/24", "malformed"));
+        assert!(private_lan_cidr("10.203.44.1/24").as_deref() != Some("10.203.44.1/24"));
+    }
     #[test]
     fn only_an_exit_node_excludes_the_native_backends() {
         let s = |enabled: bool, exit: &str| Settings {
@@ -1586,10 +1732,10 @@ mod tests {
         let p = json!({"WantRunning":true,"CorpDNS":false,"RouteAll":false,"ExitNodeID":"","ExitNodeIP":"",
             "AdvertiseRoutes":["192.168.0.0/24"]});
         let lan = vec!["192.168.0.0/24".to_string()];
-        assert!(verify(&p, true, "", &lan));
-        assert!(!verify(&p, true, "", &[]));
+        assert!(verify(&p, true, "", &lan, false));
+        assert!(!verify(&p, true, "", &[], false));
         let none = json!({"WantRunning":false,"CorpDNS":false,"RouteAll":false,"ExitNodeID":"","AdvertiseRoutes":null});
-        assert!(verify(&none, false, "", &[]) && !verify(&none, false, "", &lan));
+        assert!(verify(&none, false, "", &[], false) && !verify(&none, false, "", &lan, false));
         // A route that is not a clean private LAN prefix fails verification.
         assert_eq!(advertised(&json!({"AdvertiseRoutes":["0.0.0.0/0"]})), None);
         assert_eq!(
@@ -1615,6 +1761,19 @@ mod tests {
         let old: Settings =
             serde_json::from_str(r#"{"revision":3,"enabled":false,"exit_node":""}"#).unwrap();
         assert!(!old.remote_access);
+        assert!(old.site_cidr.is_empty());
+        assert!(serde_json::to_value(&old)
+            .unwrap()
+            .get("site_cidr")
+            .is_none());
+        let site: Update = serde_json::from_str(
+            r#"{"action":"site_route","expected_revision":4,"site_cidr":"10.203.44.0/24"}"#,
+        )
+        .unwrap();
+        assert_eq!(site.revision(), 4);
+        assert!(serde_json::from_str::<Update>(
+            r#"{"action":"site_route","expected_revision":4,"site_cidr":"10.203.44.0/24","command":"no"}"#,
+        ).is_err());
     }
     #[test]
     fn off_intent_is_durable_before_patch_or_withdrawal_failure() {
@@ -1626,6 +1785,7 @@ mod tests {
                 enabled: true,
                 exit_node: String::new(),
                 remote_access: false,
+                site_cidr: String::new(),
             });
             let mut next = saved.borrow().clone();
             next_revision(&mut next, 8).unwrap();
@@ -1856,20 +2016,21 @@ mod tests {
     #[test]
     fn prefs_require_explicit_safe_values() {
         let p = json!({"WantRunning":true,"CorpDNS":true,"RouteAll":false,"ExitNodeID":"n1","ExitNodeAllowLANAccess":true});
-        assert!(verify(&p, true, "n1", &[]));
-        assert!(!verify(&p, false, "n1", &[]));
+        assert!(verify(&p, true, "n1", &[], false));
+        assert!(!verify(&p, false, "n1", &[], false));
         let mut q = p.clone();
         q["RouteAll"] = json!(true);
-        assert!(!verify(&q, true, "n1", &[]));
+        assert!(!verify(&q, true, "n1", &[], false));
+        assert!(verify(&q, true, "n1", &[], true));
         q = p.clone();
         q["CorpDNS"] = json!(false);
-        assert!(!verify(&q, true, "n1", &[]));
+        assert!(!verify(&q, true, "n1", &[], false));
         q["ExitNodeID"] = json!("");
-        assert!(verify(&q, true, "", &[]));
+        assert!(verify(&q, true, "", &[], false));
         q["WantRunning"] = json!(false);
-        assert!(verify(&q, false, "", &[]));
+        assert!(verify(&q, false, "", &[], false));
         q["CorpDNS"] = json!(true);
-        assert!(!verify(&q, false, "", &[]));
+        assert!(!verify(&q, false, "", &[], false));
         assert!(accept_dns(true, "n1"));
         assert!(!accept_dns(true, ""));
         assert!(!accept_dns(false, "n1"));

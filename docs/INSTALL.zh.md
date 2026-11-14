@@ -127,7 +127,8 @@ python3 scripts/verify-screen.py --gateway 192.168.0.1 --ssh-key ~/.ssh/id_ed255
   - *Tailscale*（安装时加了 `--with-tailscale`）：用页面上的登录链接（在手机或电脑上打开）
     或认证密钥登录。然后二选一：开启 **远程管理**，让你的 tailnet 访问本路由器及其局域网，
     可与 Clash 或 WireGuard 同时使用（在 Tailscale 管理后台批准一次 `192.168.0.0/24` 路由）；
-    或者使用 **Tailscale 模式**，通过出口节点上网。
+    或者使用 **Tailscale 模式**，通过出口节点上网。开启远程管理且不选择出口节点时，还可配置
+    **站点互联**，通过 Tailscale 访问对端已批准的私有 IPv4 子网；详见 [站点互联说明](TAILSCALE-SITE.zh.md)。
 - **无线中继**：把已有的 Wi-Fi 当作上网通道。本分支为规避已观测到的 AP/STA 冲突，
   中继时由守护暂停与上游同频段的热点，保留另一频段；这是当前策略，不是对所有固件或硬件能力的绝对结论。**开启前准备另一频段或 USB 备用管理通道**，不要假设客户端会自动漫游。守护会提交 UCI，并在 `/data/local/tmp/relay-band-guard.disabled` 留下跨重启恢复标记，见[中继边界](WIFI-UPLINK.md#band-guard-and-management-access)。
 - **网络 → 客户端**：已连接的设备；拉黑或解除拉黑 Wi-Fi 设备（触摸屏上也可以）。

@@ -17,7 +17,7 @@ export const validHostname = (s: string) => s === '' || /^[A-Za-z0-9](?:[A-Za-z0
 /** Empty signs in through a browser link instead. */
 export const validAuthKey = (s: string) => s === '' || /^tskey-[A-Za-z0-9_-]{10,250}$/.test(s)
 
-export function tailscaleUpdate(status: TailscaleStatus, action: TailscaleUpdate['action'], exitNode = '', signIn?: SignIn): TailscaleUpdate {
+export function tailscaleUpdate(status: TailscaleStatus, action: TailscaleUpdate['action'], exitNode = '', signIn?: SignIn, siteCidr = ''): TailscaleUpdate {
   if (action === 'login') {
     const hostname = signIn?.hostname.trim() ?? '', authKey = signIn?.authKey.trim() ?? ''
     if (!validHostname(hostname)) throw new Error('Device name may use only letters, digits and hyphens (up to 63)') // i18n-ignore: translated at display
@@ -32,6 +32,9 @@ export function tailscaleUpdate(status: TailscaleStatus, action: TailscaleUpdate
   }
   if (action === 'remote_access') {
     return { expected_revision: status.revision, action, enabled: !status.remote_access }
+  }
+  if (action === 'site_route') {
+    return { expected_revision: status.revision, action, site_cidr: siteCidr }
   }
   if (action === 'remote_ssh') {
     return { expected_revision: status.revision, action, enabled: status.remote_ssh !== true }

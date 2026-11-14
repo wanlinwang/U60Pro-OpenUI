@@ -143,6 +143,15 @@ ip -4 route flush table {table} 2>/dev/null || true
     /// `mode` is `all` (macs are exclusions) or `selected`; `dns` is the IPv4 resolver that
     /// marked clients' port-53 traffic is redirected to. Inputs must already be validated.
     pub fn policy(&self, mode: &str, macs: &[String], dns: &str) -> String {
+        self.policy_with_site(mode, macs, dns, crate::tailscale::site_cidr().as_deref())
+    }
+    fn policy_with_site(
+        &self,
+        mode: &str,
+        macs: &[String],
+        dns: &str,
+        site: Option<&str>,
+    ) -> String {
         let (p, mark, table, iface) = (self.prefix, self.mark, self.table, self.iface);
         let mut out = String::from("set -eu\n");
         // Create unreachable fallback first: marked packets must never fall through to WAN.
@@ -154,6 +163,11 @@ ip -4 route flush table {table} 2>/dev/null || true
         out.push_str(&format!(
             "iptables -w 2 -t mangle -A {p}_MARK ! -i br-lan -j RETURN\n"
         ));
+        // Site destinations must bypass proxy marking, including their DNS traffic.
+        // The Tailscale manager installs the destination guard before policy creation.
+        if let Some(cidr) = site {
+            out.push_str(&crate::site_route::egress_bypass(p, cidr));
+        }
         // Keep router/LAN and broadcast discovery local. Actual connected subnet is discovered, never hardcoded.
         out.push_str(&format!("for net in $(ip -o -4 route show dev br-lan scope link | awk '{{print $1}}'); do\niptables -w 2 -t mangle -A {p}_MARK -d \"$net\" -p tcp ! --dport 53 -j RETURN\niptables -w 2 -t mangle -A {p}_MARK -d \"$net\" -p udp ! --dport 53 -j RETURN\niptables -w 2 -t mangle -A {p}_MARK -d \"$net\" -p icmp -j RETURN\ndone\niptables -w 2 -t mangle -A {p}_MARK -d 224.0.0.0/4 -j RETURN\niptables -w 2 -t mangle -A {p}_MARK -d 255.255.255.255/32 -j RETURN\n"));
         out.push_str(&self.selection(
@@ -324,5 +338,22 @@ ip -4 route show table {table} | grep -q 'unreachable default'
     }
     pub fn healthy(&self) -> bool {
         run("sh", &["-c", &self.health_check()]).is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn site_subnet_is_exempt_before_proxy_marking_and_dns_redirection() {
+        let policy =
+            crate::clash::EGRESS.policy_with_site("all", &[], "198.18.0.2", Some("10.203.44.0/24"));
+        let bypass = policy
+            .find("-d 10.203.44.0/24 -m comment --comment openui-ts-site-route -j RETURN")
+            .unwrap();
+        assert!(bypass < policy.find("MARK --set-xmark").unwrap());
+        assert!(bypass < policy.find("--dport 53 -j DNAT").unwrap());
+        assert!(!crate::clash::EGRESS
+            .policy_with_site("all", &[], "198.18.0.2", None)
+            .contains("openui-ts-site-route"));
     }
 }
