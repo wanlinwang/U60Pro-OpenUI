@@ -39,7 +39,7 @@ static void usblan_tests(struct drm_buf *b,const char *dir) {
   usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18\tT-Mobile");page=MENU;
   assert(!strcmp(data.toolbox.carrier,"T-Mobile"));
   render(b);assert(strstr(html,"T-Mobile")&&!strstr(html,"dBm")&&!strstr(html,"5G SA"));
-  assert(strstr(html,"left:287px;top:82px;width:3px;height:12px;background:#4cc97a")&&strstr(html,"left:292px;top:79px;width:3px;height:15px;background:#323a47"));
+  assert(strstr(html,"left:304px;top:23px;width:3px;height:12px;background:#4cc97a")&&strstr(html,"left:309px;top:20px;width:3px;height:15px;background:#323a47"));
   capture_both(b,dir,"menu-carrier");
   /* An older agent's H39, or no service name: the radio type stands in. */
   usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18");page=MENU;render(b);
@@ -56,7 +56,7 @@ static void usblan_tests(struct drm_buf *b,const char *dir) {
   }
   assert(data.toolbox.sim==0&&data.toolbox.rsrp==NO_FIGURE&&data.toolbox.sinr==NO_FIGURE&&data.toolbox.rsrq==NO_FIGURE);
   page=MENU;render(b);assert(strstr(html,"No SIM")&&!strstr(html,"dBm")&&!strstr(html,"LIMITED"));
-  assert(strstr(html,"left:277px;top:88px;width:3px;height:6px;background:#323a47"));
+  assert(strstr(html,"left:294px;top:29px;width:3px;height:6px;background:#323a47"));
   capture_both(b,dir,"menu-no-sim");
   page=SIGNAL_PAGE;render(b);assert(strstr(html,"No SIM")&&!strstr(html," dBm")&&!strstr(html,"LIMITED"));
   capture_both(b,dir,"signal-no-sim");

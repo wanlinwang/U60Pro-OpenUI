@@ -30,26 +30,26 @@ static void relay_warning(int y) {
 }
 static void render_relay_form(void) {
   header(L("Network editor","编辑网络"));
-  nav_row(12,72,296,52,"rssid",L("SSID","网络名称"),relay_edit.ssid[0]?relay_edit.ssid:L("Tap to enter ASCII SSID","点击输入 ASCII SSID"),"",!relay_edit.from_scan&&relay_ascii(relay_edit.ssid));
-  nav_row(12,132,296,52,"rsecurity",L("Security (tap to cycle)","安全类型（点击切换）"),relay_security_name(relay_edit.security),"",!relay_edit.from_scan);
-  switch_row(12,192,296,48,"rhidden","rhidden",L("Hidden network","隐藏网络"),L("Manual SSID is supported","支持手动输入 SSID"),relay_edit.hidden, !relay_edit.from_scan);
+  nav_row(12,70,296,48,"rssid",L("SSID","网络名称"),relay_edit.ssid[0]?relay_edit.ssid:L("Tap to enter ASCII SSID","点击输入 ASCII SSID"),"",!relay_edit.from_scan&&relay_ascii(relay_edit.ssid));
+  nav_row(12,120,296,48,"rsecurity",L("Security (tap to cycle)","安全类型（点击切换）"),relay_security_name(relay_edit.security),"",!relay_edit.from_scan);
+  switch_row(12,170,296,48,"rhidden","rhidden",L("Hidden network","隐藏网络"),L("Manual SSID is supported","支持手动输入 SSID"),relay_edit.hidden, !relay_edit.from_scan);
   const char *hint=relay_edit.security==0?L("Open network: no password","开放网络：无需密码"):relay_edit.keep?L("Keep saved password","保留已保存密码"):relay_edit.password[0]?L("New password entered (masked)","已输入新密码（隐藏）"):L("Enter 8–63 ASCII; WPA2 hex64","输入 8–63 ASCII；WPA2 支持 hex64");
-  nav_row(12,248,296,52,"rpassword",L("Password","密码"),hint,"",relay_edit.security>0&&relay_edit.security<4);
-  linkbox(12,308,142,44,"rkeep",L("Keep saved","保留原密码"),relay_edit.saved&&relay_edit.has_secret&&relay_edit.security>0&&relay_edit.security==relay_edit.original_security,relay_edit.keep?CHOSEN:PLAIN);
-  linkbox(166,308,142,44,"rclearpass",L("Clear password","清空密码"),relay_edit.security>0,PLAIN);
-  relay_warning(360);
-  linkbox(12,414,142,52,"rcancel",L("Cancel","取消"),1,PLAIN);
-  linkbox(166,414,142,52,"rsave",L("Save only","仅保存"),relay_ready()&&relay_edit.rev==data.uplink.rev&&relay_form_valid(),PRIMARY);
+  nav_row(12,220,296,48,"rpassword",L("Password","密码"),hint,"",relay_edit.security>0&&relay_edit.security<4);
+  linkbox(12,270,142,44,"rkeep",L("Keep saved","保留原密码"),relay_edit.saved&&relay_edit.has_secret&&relay_edit.security>0&&relay_edit.security==relay_edit.original_security,relay_edit.keep?CHOSEN:PLAIN);
+  linkbox(166,270,142,44,"rclearpass",L("Clear password","清空密码"),relay_edit.security>0,PLAIN);
+  relay_warning(320);
+  linkbox(12,368,142,48,"rcancel",L("Cancel","取消"),1,PLAIN);
+  linkbox(166,368,142,48,"rsave",L("Save only","仅保存"),relay_ready()&&relay_edit.rev==data.uplink.rev&&relay_form_valid(),PRIMARY);
 }
 static void render_relay_detail(void) {
   header(L("Saved network","已保存网络"));
   sbox(16,78,288,24,"head",relay_edit.ssid);
   box(16,110,288,20,"muted",relay_security_name(relay_edit.security));
   box(16,140,288,44,"wrap muted",L("Preferred is not connected. Check live status / IP.","优先不等于已连接，请查看实时状态 / IP。"));
-  linkbox(12,202,296,52,"rconnect",L("Connect / switch to this network","连接 / 切换到此网络"),relay_ready(),PRIMARY);
-  linkbox(12,266,296,52,"redit",L("Edit network","编辑网络"),relay_ready(),PLAIN);
-  linkbox(12,330,296,52,"rdelete",L("Delete saved network","删除已保存网络"),relay_ready(),DANGER);
-  relay_warning(402);
+  linkbox(12,190,296,48,"rconnect",L("Connect / switch to this network","连接 / 切换到此网络"),relay_ready(),PRIMARY);
+  linkbox(12,242,296,48,"redit",L("Edit network","编辑网络"),relay_ready(),PLAIN);
+  linkbox(12,294,296,48,"rdelete",L("Delete saved network","删除已保存网络"),relay_ready(),DANGER);
+  relay_warning(350);
 }
 static void render_relay_list(void) {
   int scan=relay_view==RV_SCAN;const struct relay_catalog *r=&data.relay;
@@ -62,15 +62,15 @@ static void render_relay_list(void) {
     const char *ssid=scan?r->scan[j].ssid:r->saved[j].ssid;int sec=scan?r->scan[j].security:r->saved[j].security;
     if(scan)snprintf(tmp,sizeof(tmp),"%d dBm · %s · %d MHz",r->scan[j].signal,relay_security_name(sec),r->scan[j].frequency);
     else snprintf(tmp,sizeof(tmp),"%s%s",relay_security_name(sec),r->saved[j].preferred?L(" · preferred"," · 优先"):"");
-    nav_row(12,102+i*58,296,52,id,ssid,tmp,sec==4?"bad":"",relay_ready()&&(!scan||(relay_scan_fresh()&&sec<4)));
+    nav_row(12,100+i*50,296,48,id,ssid,tmp,sec==4?"bad":"",relay_ready()&&(!scan||(relay_scan_fresh()&&sec<4)));
   }
   if(!total)box(16,136,288,60,"wrap muted",scan?L("Tap Scan. Nothing runs automatically. Unsupported security is read-only.","点击扫描，不会自动扫描。不支持的安全类型仅供查看。"):L("No saved networks. Add a manual SSID or scan nearby Wi-Fi.","尚无已保存网络。可手动添加 SSID 或扫描附近 Wi-Fi。"));
-  linkbox(12,342,92,44,"rprev",L("Previous","上一页"),relay_offset>0,PLAIN);
-  snprintf(tmp,sizeof(tmp),"%d / %d",total?relay_offset/4+1:0,(total+3)/4);box(112,354,96,20,"center muted",tmp);
-  linkbox(216,342,92,44,"rnext",L("Next","下一页"),relay_offset+4<total,PLAIN);
-  linkbox(12,396,142,48,"rmanual",L("Manual SSID","手动添加"),relay_ready(),PLAIN);
-  linkbox(166,396,142,48,"rscan",L("Scan…","扫描…"),relay_ready(),PRIMARY);
-  sbox(12,450,296,20,"warn",L("Shared radio: hotspot clients may disconnect","共享射频：热点客户端可能断开"));
+  linkbox(12,302,92,44,"rprev",L("Previous","上一页"),relay_offset>0,PLAIN);
+  snprintf(tmp,sizeof(tmp),"%d / %d",total?relay_offset/4+1:0,(total+3)/4);box(112,314,96,20,"center muted",tmp);
+  linkbox(216,302,92,44,"rnext",L("Next","下一页"),relay_offset+4<total,PLAIN);
+  linkbox(12,354,142,48,"rmanual",L("Manual SSID","手动添加"),relay_ready(),PLAIN);
+  linkbox(166,354,142,48,"rscan",L("Scan…","扫描…"),relay_ready(),PRIMARY);
+  sbox(12,410,296,20,"warn",L("Shared radio: hotspot clients may disconnect","共享射频：热点客户端可能断开"));
 }
 static int render_relay_full(void) {
   if(!data.relay.has&&relay_view==RV_STATUS)return 0;

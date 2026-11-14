@@ -6,19 +6,22 @@ static int sms_unhex(char *dst,size_t cap,const char *hex) {
 }
 static void sms_fetch(void) {
   char req[240],reply[32768],key[197];
-  if(sms_ui.view==SMS_THREAD||sms_ui.view==SMS_DETAIL) {
-    relay_hex(key,sms_ui.thread_key);snprintf(req,sizeof(req),"sms chat2 %s %d\n",key,sms_ui.thread_offset);relay_wipe(key,sizeof(key));
+  int chat=sms_ui.view==SMS_THREAD||sms_ui.view==SMS_DETAIL;
+  if(chat) {
+    relay_hex(key,sms_ui.thread_key);snprintf(req,sizeof(req),"sms chat3 %s %d\n",key,sms_ui.thread_offset);relay_wipe(key,sizeof(key));
   } else snprintf(req,sizeof(req),"sms conversations %d\n",sms_ui.offset);
-  if(exchange(req,reply,sizeof(reply))!=0){sms_ui.n=0;sms_ui.load_error=1;relay_wipe(req,sizeof(req));return;}
+  int result=exchange(req,reply,sizeof(reply));
+  /* Older agents only know chat2. Fall back without changing their protocol. */
+  if(chat&&(result!=0||strncmp(reply,"CHAT ",5))) {req[8]='2';result=exchange(req,reply,sizeof(reply));}
+  if(result!=0){sms_ui.n=0;sms_ui.load_error=1;relay_wipe(req,sizeof(req));return;}
   relay_wipe(req,sizeof(req));
   char *save,*line=strtok_r(reply,"\n",&save);int total,offset,n=0;
-  int chat=sms_ui.view==SMS_THREAD||sms_ui.view==SMS_DETAIL;
   const char *format=chat?"CHAT %d %d":"SMS %d %d";
   if(!line||sscanf(line,format,&total,&offset)!=2||total<0||total>(chat?100000:500)||offset<0||offset>total||(chat&&(total==0||offset==total))){sms_ui.n=0;sms_ui.load_error=1;relay_wipe(reply,sizeof(reply));return;}
-  struct sms_row rows[5];memset(rows,0,sizeof(rows));int valid=1,height=0;
+  struct sms_row rows[6];memset(rows,0,sizeof(rows));int valid=1,height=0;
   while((line=strtok_r(NULL,"\n",&save))&&strcmp(line,".")) {
     char *fields[7];int count=split_tabs(line,fields,7);int tag;
-    if(count!=6||n>=5||sscanf(fields[1],"%d",&tag)!=1||tag<0||tag>255){valid=0;break;}
+    if(count!=6||n>=6||sscanf(fields[1],"%d",&tag)!=1||tag<0||tag>255){valid=0;break;}
     if(chat) {
       int part,parts;
       if(strcmp(fields[0],"b")||sscanf(fields[2],"%d",&part)!=1||sscanf(fields[3],"%d",&parts)!=1||part<1||parts<part||parts>100||
@@ -30,7 +33,7 @@ static void sms_fetch(void) {
        !sms_unhex(rows[n].date,sizeof(rows[n].date),fields[4])||!sms_unhex(rows[n].content,sizeof(rows[n].content),fields[5])){valid=0;break;}
     rows[n++].tag=tag;
   }
-  if(!line||strcmp(line,".")||(chat?(n<1||height>280):(n>4||n>total-offset)))valid=0;
+  if(!line||strcmp(line,".")||(chat?(n<1||height>310):(n>4||n>total-offset)))valid=0;
   if(!valid){sms_ui.n=0;sms_ui.load_error=1;relay_wipe(rows,sizeof(rows));relay_wipe(reply,sizeof(reply));return;}
   sms_ui.load_error=0;relay_wipe(sms_ui.rows,sizeof(sms_ui.rows));memcpy(sms_ui.rows,rows,sizeof(rows));sms_ui.n=n;sms_ui.total=total;
   if(sms_ui.view==SMS_THREAD||sms_ui.view==SMS_DETAIL)sms_ui.thread_offset=offset;else sms_ui.offset=offset;

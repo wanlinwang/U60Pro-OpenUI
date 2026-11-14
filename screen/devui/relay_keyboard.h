@@ -1,8 +1,7 @@
 /* 320x480 local touchscreen keyboard. Every visible key is an HTML hit action.
  * Narrow character keys are 30x44; editing/action controls are >=44 pixels high. */
 static void relay_keybox(int x,int y,int w,const char *id,const char *label) {
-  add("<a id=\"%s\" href=\"act:%s\" class=\"box btn\" style=\"left:%dpx;top:%dpx;width:%dpx;height:44px;line-height:42px\">",id,id,x,y,w);
-  shortened(label,w-4,16);add("</a>");
+  compact_linkbox(x,y,w,44,id,label,1,PLAIN,4);
 }
 static int sms_keyboard_inline(void) {
   return page==SMS_PAGE&&sms_ui.view==SMS_THREAD&&relay_view==RV_KEYBOARD;

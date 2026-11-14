@@ -156,7 +156,7 @@ enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_
 static int pending_kind;
 enum { SMS_LIST, SMS_THREAD, SMS_DETAIL, SMS_COMPOSE, SMS_CONFIRM };
 struct sms_row { int tag, part, parts; char key[99], number[97], date[65], content[2049]; };
-static struct { int view, total, offset, thread_offset, n, chosen, text_offset, load_error, from_thread; char thread_key[99], thread_number[97], number[33], message[161], before[161]; struct sms_row rows[5]; } sms_ui;
+static struct { int view, total, offset, thread_offset, n, chosen, text_offset, load_error, from_thread; char thread_key[99], thread_number[97], number[33], message[161], before[161]; struct sms_row rows[6]; } sms_ui;
 static void sms_fetch(void);
 static int sms_reply_number(void);
 static void sms_leave(void);
@@ -498,11 +498,13 @@ static int exchange(const char *request, char *reply, size_t cap) {
 /* Preview: the last request, all requests since the log was cleared, canned replies. */
 static char test_request[4096], test_log[8192];
 static const char *stub_groups, *stub_nodes, *stub_status, *stub_sms, *stub_sms_thread, *stub_job = "OK 1\n";
+static int stub_sms_legacy_agent;
 static int exchange(const char *r, char *out, size_t cap) {
   snprintf(test_request, sizeof(test_request), "%s", r);
   size_t used = strlen(test_log);
   snprintf(test_log + used, sizeof(test_log) - used, "%s", r);
-  const char *reply = !strcmp(r,"status\n")?stub_status:!strncmp(r, "sms conversations ", 18) ? stub_sms : !strncmp(r, "sms chat2 ", 10) ? stub_sms_thread : !strncmp(r, "groups ", 7) ? stub_groups : !strncmp(r, "nodes ", 6) ? stub_nodes : stub_job;
+  if (stub_sms_legacy_agent && !strncmp(r, "sms chat3 ", 10)) {snprintf(out,cap,"ERR unsupported\n");return 0;}
+  const char *reply = !strcmp(r,"status\n")?stub_status:!strncmp(r, "sms conversations ", 18) ? stub_sms : (!strncmp(r, "sms chat2 ", 10) || !strncmp(r, "sms chat3 ", 10)) ? stub_sms_thread : !strncmp(r, "groups ", 7) ? stub_groups : !strncmp(r, "nodes ", 6) ? stub_nodes : stub_job;
   if (!reply) return -1;
   snprintf(out, cap, "%s", reply);
   return 0;
@@ -1078,6 +1080,9 @@ static int input_self_test(void) {
   assert(x == 319 && y == 479);
   rotate_point(&x, &y);
   assert(x == 0 && y == 0);
+  int bx, by, bw, bh;
+  assert(html_view_rect("#stock", &bx, &by, &bw, &bh));
+  int raw_x = W - 1 - (bx + bw / 2), raw_y = H - 1 - (by + bh / 2);
   struct input_touch t = {.fd = -1,
                           .id = {-1, -1},
                           .ax = {.minimum = 0, .maximum = 319},
@@ -1085,8 +1090,8 @@ static int input_self_test(void) {
   const struct input_event events[] = {
       {.type = EV_ABS, .code = ABS_MT_SLOT, .value = 0},
       {.type = EV_ABS, .code = ABS_MT_TRACKING_ID, .value = 1},
-      {.type = EV_ABS, .code = ABS_MT_POSITION_X, .value = 69},
-      {.type = EV_ABS, .code = ABS_MT_POSITION_Y, .value = 459},
+      {.type = EV_ABS, .code = ABS_MT_POSITION_X, .value = raw_x},
+      {.type = EV_ABS, .code = ABS_MT_POSITION_Y, .value = raw_y},
       {.type = EV_SYN, .code = SYN_REPORT},
       {.type = EV_ABS, .code = ABS_MT_TRACKING_ID, .value = -1},
       {.type = EV_SYN, .code = SYN_REPORT}};
@@ -1114,7 +1119,7 @@ static int input_self_test(void) {
     struct input_event e=repeated[0]; input_event(&t,&e);
     e=(struct input_event){.type=EV_ABS,
       .code=axis_only?ABS_MT_POSITION_Y:ABS_MT_POSITION_X,
-      .value=axis_only?458:70}; input_event(&t,&e);
+      .value=axis_only?raw_y-1:raw_x-1}; input_event(&t,&e);
     for (size_t i=1;i<sizeof(repeated)/sizeof(repeated[0]);i++) {
       e=repeated[i]; input_event(&t,&e);
     }
@@ -1158,7 +1163,7 @@ static int input_self_test(void) {
     input_event(&t, &e);
   }
   struct input_event move = {
-      .type = EV_ABS, .code = ABS_MT_POSITION_X, .value = 109};
+      .type = EV_ABS, .code = ABS_MT_POSITION_X, .value = raw_x-40};
   input_event(&t, &move);
   struct input_event syn = {.type = EV_SYN, .code = SYN_REPORT};
   input_event(&t, &syn);
@@ -1192,14 +1197,14 @@ static int input_self_test(void) {
   assert(!quitting&&!t.xok&&!t.yok&&t.wait_clean&&t.resync_failed);
   assert(input_event(&t,&syn)==-1&&t.wait_clean&&t.resync_failed);
   /* Failed/missing ioctl state never becomes idle just because SYN arrived. */
-  input_resync_apply(&t,0,0,69,459,-1,-1);
+  input_resync_apply(&t,0,0,raw_x,raw_y,-1,-1);
   assert(input_event(&t,&syn)==-1);
-  input_resync_apply(&t,1,2,69,459,-1,-1);
+  input_resync_apply(&t,1,2,raw_x,raw_y,-1,-1);
   assert(input_event(&t,&syn)==-1);
-  input_resync_apply(&t,1,0,69,459,4,-1);
+  input_resync_apply(&t,1,0,raw_x,raw_y,4,-1);
   assert(!t.resync_failed&&t.wait_clean);
   input_event(&t,&syn);assert(!t.down&&t.wait_clean);
-  input_resync_apply(&t,1,0,69,459,-1,-1);
+  input_resync_apply(&t,1,0,raw_x,raw_y,-1,-1);
   assert(!t.wait_clean&&!t.resync_failed);
   /* Only a known clean state after a lost stream can act again. */
   for (size_t i=0;i<sizeof(events)/sizeof(events[0]);i++) {
@@ -2465,7 +2470,19 @@ int main(int argc, char **argv) {
   assert(strstr(html,"⚡充电中")&&!strstr(html,"12%⚡")&&!strstr(html,"background:#f06a6a;border-radius")&&!strstr(html,"background:#2f8a55;border-radius"));
   {char frame0[16384];snprintf(frame0,sizeof(frame0),"%s",html);
    charge_frame=2;render(&b);assert(strstr(html,"background:#2f8a55;border-radius")&&strcmp(frame0,html));}
-  page=MENU;charge_frame=3;capture(&b,argv[1],"menu-charging");assert(strstr(html,"12%⚡")&&strstr(html,"background:#2f8a55;border-radius"));
+  page=MENU;charge_frame=3;capture(&b,argv[1],"menu-charging");assert(strstr(html,"12%⚡")&&strstr(html,"background:#2f8a55"));
+  assert(html_view_text_width_px("100%⚡",16)<=54);
+  data.battery=100;data.charging=2;capture(&b,argv[1],"menu-battery-full");assert(strstr(html,"100%⚡"));
+  /* Full fill reaches the bottom inside edge; the battery tip and signal have
+   * four background pixels between them in the rendered RGB565 frame. */
+  {const uint16_t *row30=(const uint16_t *)((const char *)b.map+30*b.pitch);
+   const uint16_t *row32=(const uint16_t *)((const char *)b.map+32*b.pitch);
+   const uint16_t *row35=(const uint16_t *)((const char *)b.map+35*b.pitch);
+   const uint16_t *row36=(const uint16_t *)((const char *)b.map+36*b.pitch);
+   assert(row35[230]==row32[230]&&row35[230]!=row36[230]);
+   assert(row30[289]!=row30[290]&&row30[290]==row30[291]&&row30[290]==row30[292]&&row30[290]==row30[293]&&row30[293]!=row30[294]);}
+  data.battery=0;data.charging=0;capture(&b,argv[1],"menu-battery-empty");assert(strstr(html,"0%")&&strstr(html,"#f06a6a"));
+  data.battery=-1;capture(&b,argv[1],"menu-battery-unknown");assert(strstr(html,"--%")&&strstr(html,"#9aa1ac"));
   data.battery=100;data.charging=2;page=OVERVIEW;capture_both(&b,argv[1],"battery-full");render(&b);assert(strstr(html,"⚡已充满")&&!strstr(html,"background:#2f8a55;border-radius"));
   data.charging=0;charge_frame=0;
   data.battery=-1;capture(&b,argv[1],"battery-unknown");assert(strstr(html,"--%"));
@@ -2482,7 +2499,10 @@ int main(int argc, char **argv) {
   dialog=1;capture(&b,argv[1],"en-confirm");dialog=0;
   char legacy[]="C 6 60 200 2 27\n.\n"; /* An agent without the field keeps Chinese. */
   assert(parse_snapshot(legacy,&prefs)&&update_settings(&prefs)==1&&settings_zh);
-  page=MENU;capture(&b,argv[1],"menu-zh");assert(strstr(html,"原厂界面"));
+  page=MENU;capture(&b,argv[1],"menu-zh");assert(strstr(html,"原生主题"));
+  {int x,y,w,h;assert(html_view_rect("#stock",&x,&y,&w,&h));
+   assert(x==80&&y==4&&w==96&&h==48&&x+w<=180);
+   assert(!strcmp(html_view_click(x+1,y+1),"act:stock"));}
   page=MENU;press_id(&b,"stock");assert(quitting);quitting=0;
   puts("PASS DevUI HTML hit testing, menu navigation, profile version capture, device pagination/drafts, escaping, confirmations, disabled states and rotation");
   proxy_tests(&b,argv[1]);

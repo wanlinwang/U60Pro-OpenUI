@@ -1109,6 +1109,7 @@ fn request(line: &str) -> String {
         Ok(Request::SmsThread { key, offset }) => screen_sms::thread(&key.0, offset),
         Ok(Request::SmsChat { key, offset }) => screen_sms::chat(&key.0, offset),
         Ok(Request::SmsChat2 { key, offset }) => screen_sms::chat2(&key.0, offset),
+        Ok(Request::SmsChat3 { key, offset }) => screen_sms::chat3(&key.0, offset),
         Ok(Request::SmsClear) => {
             screen_sms::clear();
             "OK\n".into()

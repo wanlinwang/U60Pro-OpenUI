@@ -353,13 +353,13 @@ static void render_nodes(void) {
     const struct group_row *r=&groups.rows[i];
     char id[8];snprintf(id,sizeof(id),"g%d",i);
     snprintf(tmp,sizeof(tmp),"%s · %s",group_type(r->type),r->now_name[0]?r->now_name:"--");
-    nav_row(12,100+62*i,296,56,id,r->name[0]?r->name:"?",tmp,"",1);
+    nav_row(12,100+52*i,296,48,id,r->name[0]?r->name:"?",tmp,"",1);
   }
   if(groups.state==1&&!groups.total)box(28,180,264,40,"wrap muted center",L("No proxy groups","没有代理分组"));
-  linkbox(12,356,100,48,"prev",L("‹ Prev","‹ 上页"),groups.state==1&&group_offset>0,PLAIN);
-  linkbox(208,356,100,48,"next",L("Next ›","下页 ›"),groups.state==1&&group_offset+4<groups.total,PLAIN);
-  snprintf(tmp,sizeof(tmp),"%d / %d",group_offset/4+1,groups.total?(groups.total+3)/4:1);box(112,370,96,20,"muted center",tmp);
-  footer(416,40,mode_hint(),"muted");
+  linkbox(12,316,100,48,"prev",L("‹ Prev","‹ 上页"),groups.state==1&&group_offset>0,PLAIN);
+  linkbox(208,316,100,48,"next",L("Next ›","下页 ›"),groups.state==1&&group_offset+4<groups.total,PLAIN);
+  snprintf(tmp,sizeof(tmp),"%d / %d",group_offset/4+1,groups.total?(groups.total+3)/4:1);box(112,330,96,20,"muted center",tmp);
+  footer(376,60,mode_hint(),"muted");
 }
 static void render_group(void) {
   char tmp[512],d[24];
@@ -374,21 +374,21 @@ static void render_group(void) {
     const struct node_row *r=&nodes.rows[i];
     int current=r->index==nodes.now, tappable=nodes.selectable&&!current&&!blocked();
     char id[8];snprintf(id,sizeof(id),"n%d",i);
-    add("<a id=\"%s\" href=\"act:%s\" class=\"box row%s\" style=\"left:12px;top:%dpx;width:296px;height:56px\">",id,tappable?id:"none",current?" current":"",100+62*i);
+    add("<a id=\"%s\" href=\"act:%s\" class=\"box row%s\" style=\"left:12px;top:%dpx;width:296px;height:48px\">",id,tappable?id:"none",current?" current":"",100+52*i);
     snprintf(tmp,sizeof(tmp),"%s%s",current?"✓ ":"",r->name[0]?r->name:"?");
-    add("<div class=\"name\" style=\"right:96px\">");shortened(tmp,186,16);
-    add("</div><div class=\"sub\" style=\"right:96px\">");escaped(r->type);add("</div>");
+    add("<div class=\"name\" style=\"right:96px;top:3px\">");shortened(tmp,186,16);
+    add("</div><div class=\"sub\" style=\"right:96px;top:25px\">");escaped(r->type);add("</div>");
     delay_text(d,sizeof(d),r->delay);
-    add("<div class=\"box head right %s\" style=\"left:196px;top:17px;width:86px;height:20px\">",delay_class(r->delay));escaped(d);add("</div></a>");
+    add("<div class=\"box head right %s\" style=\"left:196px;top:13px;width:86px;height:20px\">",delay_class(r->delay));escaped(d);add("</div></a>");
   }
-  linkbox(12,356,92,48,"prev",L("‹ Prev","‹ 上页"),nodes.ok&&node_offset>0,PLAIN);
-  linkbox(112,356,96,48,"test",pending&&pending_kind==JOB_DELAY?L("Testing","测速中"):L("Test","测速"),nodes.ok&&!blocked(),PRIMARY);
-  linkbox(216,356,92,48,"next",L("Next ›","下页 ›"),nodes.ok&&node_offset+4<nodes.total,PLAIN);
-  snprintf(tmp,sizeof(tmp),"%d / %d",node_offset/4+1,nodes.total?(nodes.total+3)/4:1);box(112,410,96,20,"muted center",tmp);
+  linkbox(12,316,92,48,"prev",L("‹ Prev","‹ 上页"),nodes.ok&&node_offset>0,PLAIN);
+  linkbox(112,316,96,48,"test",pending&&pending_kind==JOB_DELAY?L("Testing","测速中"):L("Test","测速"),nodes.ok&&!blocked(),PRIMARY);
+  linkbox(216,316,92,48,"next",L("Next ›","下页 ›"),nodes.ok&&node_offset+4<nodes.total,PLAIN);
+  snprintf(tmp,sizeof(tmp),"%d / %d",node_offset/4+1,nodes.total?(nodes.total+3)/4:1);box(112,370,96,20,"muted center",tmp);
   const char *hint=pending&&pending_kind==JOB_DELAY?L("Testing every node, up to 20 s.","正在测试全部节点，最多 20 秒。"):
     pending&&pending_kind==JOB_SELECT?L("Switching node...","正在切换节点..."):
     nodes.ok&&!nodes.selectable?L("This group picks its node itself.","此分组自动选择节点。"):"";
-  footer(436,40,hint,pending?"warn":"muted");
+  footer(396,60,hint,pending?"warn":"muted");
 }
 static void render_subs(void) {
   char tmp[256];
@@ -398,18 +398,18 @@ static void render_subs(void) {
   for(int i=0;i<data.nsubs;i++) {
     const struct sub_info *s=&data.subs[i];
     char id[8];snprintf(id,sizeof(id),"s%d",i);
-    open_row(12,96+64*i,296,58,id,!stale(),s->active?"current":"");
-    add("<div class=\"box head\" style=\"left:14px;top:8px;width:%dpx;height:20px\">",s->active?200:236);shortened(s->name[0]?s->name:"?",s->active?200:236,16);add("</div>");
-    if(s->active)add("<div class=\"box badge\" style=\"right:12px;top:7px;width:56px;height:22px\">%s</div>",L("Active","当前"));
-    else chevron(58);
+    open_row(12,96+52*i,296,48,id,!stale(),s->active?"current":"");
+    add("<div class=\"box head\" style=\"left:14px;top:3px;width:%dpx;height:20px\">",s->active?200:236);shortened(s->name[0]?s->name:"?",s->active?200:236,16);add("</div>");
+    if(s->active)add("<div class=\"box badge\" style=\"right:12px;top:3px;width:56px;height:22px\">%s</div>",L("Active","当前"));
+    else chevron(48);
     const char *cls="muted";
     if(!s->downloaded){snprintf(tmp,sizeof(tmp),"%s",L("Not downloaded yet","尚未下载"));cls="warn";}
     else if(s->failed){snprintf(tmp,sizeof(tmp),"%s",L("Last update failed","上次更新失败"));cls="bad";}
     else cls=usage_text(tmp,sizeof(tmp),s);
-    add("<div class=\"box %s\" style=\"left:14px;top:31px;width:236px;height:20px\">",stale()?"":cls);shortened(tmp,236,16);add("</div></a>");
+    add("<div class=\"box %s\" style=\"left:14px;top:25px;width:236px;height:20px\">",stale()?"":cls);shortened(tmp,236,16);add("</div></a>");
   }
   if(!data.nsubs)box(28,150,264,60,"wrap muted",L("Add subscriptions in the OpenUI webpage first.","请先在 OpenUI 网页中添加订阅。"));
-  footer(420,40,pending&&pending_kind==JOB_REFRESH?L("Updating the subscription...","正在更新订阅..."):
+  footer(370,60,pending&&pending_kind==JOB_REFRESH?L("Updating the subscription...","正在更新订阅..."):
          L("Adding and editing stay in OpenUI.","添加与编辑请在 OpenUI 中进行。"),pending?"warn":"muted");
 }
 static void render_sub_dialog(void) {
@@ -503,11 +503,11 @@ static void render_core(void) {
   else if(c->latest[0]&&c->published[0])snprintf(tmp,sizeof(tmp),L("Latest release: %s","最新发布：%s"),c->published);
   sbox(16,222,292,20,cls,tmp);
   int idle=core_idle();
-  linkbox(12,256,142,56,"ccheck",running&&!strcmp(c->kind,"check")?L("Checking","检查中"):L("Check update","检查更新"),idle,PLAIN);
-  linkbox(166,256,142,56,"cupdate",L("Update core","更新内核"),core_update_ok(),PRIMARY);
-  linkbox(12,320,142,56,"crollback",L("Roll back","回滚"),idle&&c->previous[0],DANGER);
-  linkbox(166,320,142,56,"cgeo",L("Update GEO","更新 GEO"),idle,PLAIN);
-  footer(392,60,L("New files are verified and test-run first; a running core restarts.","新文件会先校验并试运行；运行中的内核会重启。"),"muted");
+  linkbox(12,252,142,48,"ccheck",running&&!strcmp(c->kind,"check")?L("Checking","检查中"):L("Check update","检查更新"),idle,PLAIN);
+  linkbox(166,252,142,48,"cupdate",L("Update core","更新内核"),core_update_ok(),PRIMARY);
+  linkbox(12,304,142,48,"crollback",L("Roll back","回滚"),idle&&c->previous[0],DANGER);
+  linkbox(166,304,142,48,"cgeo",L("Update GEO","更新 GEO"),idle,PLAIN);
+  footer(364,84,L("New files are verified and test-run first; a running core restarts.","新文件会先校验并试运行；运行中的内核会重启。"),"muted");
 }
 static const char *check_name(const char *id) {
   static const struct { const char *id, *en, *zh; } names[] = {
@@ -692,20 +692,20 @@ static void render_esim(void) {
     const struct esim_row *r=&e->rows[esim_offset+i];
     char id[8];snprintf(id,sizeof(id),"e%d",i);
     int on=r->enabled;
-    open_row(12,148+56*i,296,52,id,!on&&esim_idle(),on?"current":"");
-    add("<div class=\"box head\" style=\"left:14px;top:5px;width:%dpx;height:20px\">",on?200:236);shortened(r->name[0]?r->name:"?",on?200:236,16);add("</div>");
-    if(on)add("<div class=\"box badge\" style=\"right:12px;top:14px;width:56px;height:22px\">%s</div>",L("Active","当前"));
-    else chevron(52);
+    open_row(12,148+52*i,296,48,id,!on&&esim_idle(),on?"current":"");
+    add("<div class=\"box head\" style=\"left:14px;top:3px;width:%dpx;height:20px\">",on?200:236);shortened(r->name[0]?r->name:"?",on?200:236,16);add("</div>");
+    if(on)add("<div class=\"box badge\" style=\"right:12px;top:12px;width:56px;height:22px\">%s</div>",L("Active","当前"));
+    else chevron(48);
     snprintf(tmp,sizeof(tmp),"ICCID …%s%s%s",r->tail,!strcmp(r->cls,"test")?L(" · test"," · 测试"):"",!strcmp(r->cls,"provisioning")?L(" · provisioning"," · 预置"):"");
-    add("<div class=\"box muted\" style=\"left:14px;top:27px;width:236px;height:20px\">");shortened(tmp,236,16);add("</div></a>");
+    add("<div class=\"box muted\" style=\"left:14px;top:25px;width:236px;height:20px\">");shortened(tmp,236,16);add("</div></a>");
   }
   if(e->n>4) {
-    linkbox(12,370,100,48,"prev",L("‹ Prev","‹ 上页"),esim_offset>0,PLAIN);
-    linkbox(208,370,100,48,"next",L("Next ›","下页 ›"),esim_offset+4<e->n,PLAIN);
-    snprintf(tmp,sizeof(tmp),"%d / %d",esim_offset/4+1,(e->n+3)/4);box(112,384,96,20,"muted center",tmp);
-  } else footer(384,20,L("Download, rename and delete in OpenUI.","下载、改名和删除请在 OpenUI 中进行。"),"muted");
-  linkbox(12,422,142,50,"escan",running&&!strcmp(e->kind,"scan")?L("Reading","读取中"):L("Read again","重新读取"),esim_idle(),PLAIN);
-  linkbox(166,422,142,50,"ereboot",L("Restart device","重启设备"),e->reboot&&!blocked(),DANGER);
+    linkbox(12,358,100,48,"prev",L("‹ Prev","‹ 上页"),esim_offset>0,PLAIN);
+    linkbox(208,358,100,48,"next",L("Next ›","下页 ›"),esim_offset+4<e->n,PLAIN);
+    snprintf(tmp,sizeof(tmp),"%d / %d",esim_offset/4+1,(e->n+3)/4);box(112,372,96,20,"muted center",tmp);
+  } else footer(362,40,L("Download, rename and delete in OpenUI.","下载、改名和删除请在 OpenUI 中进行。"),"muted");
+  linkbox(12,412,142,48,"escan",running&&!strcmp(e->kind,"scan")?L("Reading","读取中"):L("Read again","重新读取"),esim_idle(),PLAIN);
+  linkbox(166,412,142,48,"ereboot",L("Restart device","重启设备"),e->reboot&&!blocked(),DANGER);
 }
 /* The Wi-Fi uplink switch needs fresh status, no job, and a saved network to turn on. */
 static int uplink_switch_ok(void) {
@@ -1080,11 +1080,11 @@ static void render_booster(void) {
   stat_row(124,L("Memory","内存"),tmp,data.memory);
   snprintf(tmp,sizeof(tmp),L("%llu running","%llu 个在运行"),h->bloat_cnt);
   kv_row(172,L("Optional services","可选服务"),tmp,h->bloat_cnt?"warn":"good");
-  linkbox(12,222,296,56,"killbloat",L("Stop optional services","停止可选服务"),!blocked(),PRIMARY);
-  linkbox(12,288,296,56,"dropcache",L("Free cached memory","释放内存缓存"),!blocked(),PLAIN);
-  linkbox(12,354,296,52,"stock",L("Return to the stock UI","返回原厂界面"),1,PLAIN);
-  footer(418,40,pending&&pending_kind==JOB_TOOL?L("Freeing resources...","正在清理..."):
-         L("Stops vendor services the router does not need.","停止路由器用不到的厂商服务。"),pending?"warn":"muted");
+  linkbox(12,222,142,48,"killbloat",L("Stop services","停止服务"),!blocked(),PRIMARY);
+  linkbox(166,222,142,48,"dropcache",L("Free cache","释放缓存"),!blocked(),PLAIN);
+  linkbox(12,278,296,48,"stock",L("Return to the stock UI","返回原厂界面"),1,PLAIN);
+  footer(340,100,pending&&pending_kind==JOB_TOOL?L("Freeing resources...","正在清理..."):
+         L("Stop optional vendor services or free cached memory.","可停止厂商可选服务，或释放内存缓存。"),pending?"warn":"muted");
 }
 static void render_confirm(void) {
   if(confirm_what==CF_KICK) {

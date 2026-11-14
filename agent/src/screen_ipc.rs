@@ -16,6 +16,10 @@ pub const PAGE: usize = 4;
 pub enum Request {
     Status,
     SmsClear,
+    SmsChat3 {
+        key: super::screen_sms::ThreadKey,
+        offset: usize,
+    },
     SmsChat2 {
         key: super::screen_sms::ThreadKey,
         offset: usize,
@@ -496,7 +500,7 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
             ["sms", "page", offset] => Ok(Request::SmsPage {
                 offset: index(offset)?,
             }),
-            ["sms", kind @ ("thread" | "chat" | "chat2"), key, offset] => {
+            ["sms", kind @ ("thread" | "chat" | "chat2" | "chat3"), key, offset] => {
                 if key.is_empty()
                     || key.len() > 196
                     || key.len() % 2 != 0
@@ -518,7 +522,9 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
                 }
                 let key = super::screen_sms::ThreadKey(key);
                 let offset = index(offset)?;
-                if *kind == "chat2" {
+                if *kind == "chat3" {
+                    Ok(Request::SmsChat3 { key, offset })
+                } else if *kind == "chat2" {
                     Ok(Request::SmsChat2 { key, offset })
                 } else if *kind == "chat" {
                     Ok(Request::SmsChat { key, offset })
@@ -1443,6 +1449,10 @@ mod tests {
         let chat2 = parse("sms chat2 6e3a2b313233 2").unwrap();
         assert!(!format!("{chat2:?}").contains("123"));
         assert!(parse("sms chat2 6e3a00 0").is_err());
+        let chat3 = parse("sms chat3 6e3a2b313233 2").unwrap();
+        assert!(matches!(chat3, Request::SmsChat3 { offset: 2, .. }));
+        assert!(!format!("{chat3:?}").contains("123"));
+        assert!(parse("sms chat3 6e3a00 0").is_err());
         let chat = parse("sms chat 6e3a2b313233 2").unwrap();
         assert!(!format!("{chat:?}").contains("123"));
         assert!(parse("sms chat 6e3a00 0").is_err());

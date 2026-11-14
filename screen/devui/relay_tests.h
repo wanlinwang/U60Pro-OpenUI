@@ -58,6 +58,11 @@ static void relay_cached_render_tests(struct drm_buf *b) {
     settings_zh=lang;relay_begin();relay_edit.security=1;relay_view=RV_EDIT;relay_key_open(RK_PASSWORD);
     unsigned long long full=relay_keyboard_scaffold_draws;
     assert(render_changed(b,0)&&relay_keyboard_scaffold_draws==full+1);relay_render_reference(b,reference);
+    /* The visual inset must not shrink the original touch targets. */
+    {int x,y,w,h;assert(html_view_rect("#back",&x,&y,&w,&h));
+      assert(!strcmp(html_view_click(x+1,y+1),"act:back"));
+      assert(html_view_rect("#rk71",&x,&y,&w,&h));
+      assert(!strcmp(html_view_click(x+1,y+1),"act:rk71"));}
     /* Eight consecutive edits without any intervening full render: same g_doc. */
     int x,y,w,h;assert(html_view_rect("#rk61",&x,&y,&w,&h));
     unsigned long long dynamic=relay_keyboard_dynamic_draws;full=relay_keyboard_scaffold_draws;

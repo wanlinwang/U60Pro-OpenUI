@@ -59,10 +59,31 @@ static void rect(int x, int y, int w, int h, const char *cls, const char *color)
 }
 /* CHOSEN marks the current choice of a group of buttons; it is not tappable. */
 enum { PLAIN, PRIMARY, DANGER, CHOSEN };
+/* Keep the full anchor as a finger-sized hit target while drawing a more
+ * compact button inside it. Tiny keyboard keys retain their usable width. */
+static void compact_linkbox(int x, int y, int w, int h, const char *id,
+                            const char *label, int enabled, int tone,
+                            int label_padding) {
+  /* Size the visible control to its label; the anchor keeps its original touch area.
+   * Leave narrow keyboard keys full-width and keep the 16px font legible. */
+  int inner_h=h>=44?32:h, inset_y=(h-inner_h)/2;
+  int inner_w=w;
+  if(w>=40) {
+    int wanted=html_view_text_width_px(label,16)+label_padding+12;
+    if(wanted<56)wanted=56;
+    if(wanted>w-8)wanted=w-8;
+    inner_w=wanted;
+  }
+  int inset_x=(w-inner_w)/2;
+  const char *style=tone==CHOSEN?"chosen":!enabled?"disabled":tone==PRIMARY?"primary":tone==DANGER?"danger":"";
+  add("<a id=\"%s\" href=\"act:%s\" class=\"box\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx\">",
+      id,enabled&&tone!=CHOSEN?id:"none",x,y,w,h);
+  add("<div class=\"box btn %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx;line-height:%dpx\">",
+      style,inset_x,inset_y,inner_w,inner_h,inner_h-2);
+  shortened(label,inner_w-label_padding,16); add("</div></a>");
+}
 static void linkbox(int x, int y, int w, int h, const char *id, const char *label, int enabled, int tone) {
-  add("<a id=\"%s\" href=\"act:%s\" class=\"box btn %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx;line-height:%dpx\">",id,enabled&&tone!=CHOSEN?id:"none",
-      tone==CHOSEN?"chosen":!enabled?"disabled":tone==PRIMARY?"primary":tone==DANGER?"danger":"",x,y,w,h,h-2);
-  shortened(label,w-24,16); add("</a>");
+  compact_linkbox(x,y,w,h,id,label,enabled,tone,16);
 }
 /* A tappable list row: bold title, muted detail line and a chevron. */
 static void open_row(int x, int y, int w, int h, const char *id, int enabled, const char *extra) {
@@ -132,6 +153,22 @@ static void battery_badge(int x, int y, int large) {
   char label[24];
   if(data.battery<0)snprintf(label,sizeof(label),"--%%");else snprintf(label,sizeof(label),plugged&&!large?"%d%%⚡":"%d%%",percent);
   if(large)box(x+w+14,y-3,120,36,"big",label);else box(x+w+10,y-2,60,20,"head",label);
+}
+/* A compact status battery with a legible percentage over a dark level fill. */
+static void header_battery(int x,int y) {
+  int percent=data.battery<0?0:data.battery>100?100:data.battery;
+  int charging=data.battery>=0&&data.charging==1,plugged=data.battery>=0&&data.charging;
+  const char *outline=data.battery<0?"#9aa1ac":percent<=20&&!charging?"#f06a6a":"#4cc97a";
+  const char *fill=percent<=20&&!charging?"#652b2b":"#194e31";
+  /* litehtml paints the 2px border outside the declared content dimensions. */
+  int climb=charging&&percent<100?58*(percent+(100-percent)*charge_frame/(CHARGE_FRAMES-1))/100:0;
+  if(climb>58*percent/100)rect(x+2,y+2,climb,16,"","#2f8a55");
+  rect(x+2,y+2,58*percent/100,16,"",fill);
+  add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:58px;height:16px;border:2px solid %s;border-radius:5px\"></div>",x,y,outline);
+  rect(x+63,y+6,3,8,"",outline);
+  char label[24];if(data.battery<0)snprintf(label,sizeof(label),"--%%");
+  else snprintf(label,sizeof(label),plugged?"%d%%⚡":"%d%%",percent);
+  box(x+4,y,54,20,"head center",label);
 }
 /* Label, right-aligned value and an optional usage bar (percent < 0: no bar). */
 static void stat_row(int y, const char *label, const char *value, double percent) {
@@ -350,26 +387,28 @@ static void build_html(void) {
       linkbox(24,284,272,56,"refresh",page==WG||page==PROFILES||page==DEVICES?L("Refresh and back","刷新并返回"):L("Refresh","刷新"),1,PRIMARY);
     }
   } else if(page==MENU) {
-    box(16,14,170,32,"title","OpenUI");
-    linkbox(196,8,116,48,"stock",L("Stock UI","原厂界面"),1,PLAIN);
-    /* Status card: battery and signal, then the proxy and the current speed. */
+    box(8,14,72,32,"title","OpenUI");
+    /* A compact visible control with a full-size hit target. */
+    add("<a id=\"stock\" href=\"act:stock\" class=\"box\" style=\"left:80px;top:4px;width:96px;height:48px\">");
+    add("<div class=\"box btn\" style=\"left:8px;top:10px;width:80px;height:28px;line-height:26px\">");
+    shortened(L("Stock UI","原生主题"),72,16);add("</div></a>");
     const struct backend_info *bk=&data.backend;
     const struct toolbox_info *tb=&data.toolbox;
+    /* Power and signal remain visible in the upper right, including when data is stale. */
+    header_battery(224,18);
+    long long signal_r=tb->has&&tb->sim!=0?tb->rsrp:NO_FIGURE;
+    int lit=signal_r==NO_FIGURE?0:signal_r>=-85?4:signal_r>=-95?3:signal_r>=-105?2:signal_r>=-115?1:0;
+    const char *signal_tone=tone_color(signal_r>-95?"good":signal_r>-110?"warn":"bad");
+    for(int i=0;i<4;i++)rect(294+i*5,20+(3-i)*3,3,6+i*3,"",i<lit?signal_tone:"#323a47");
+    /* Keep the carrier / SIM or uptime above the proxy and current speed. */
     add("<div class=\"box card\" style=\"left:10px;top:64px;width:300px;height:84px\"></div>");
-    battery_badge(24,78,0);
     if(tb->has&&(tb->sim==0||tb->rsrp!=NO_FIGURE)) {
-      /* The carrier and four bars; the Signal page keeps the figures. Without a carrier
-       * name (older agent, no service) the radio type stands in; without a SIM, unlit. */
-      long long r=tb->sim==0?NO_FIGURE:tb->rsrp;
-      int lit=r==NO_FIGURE?0:r>=-85?4:r>=-95?3:r>=-105?2:r>=-115?1:0;
-      const char *tone=tone_color(r>-95?"good":r>-110?"warn":"bad");
-      if(tb->sim==0)sbox(130,76,140,20,"head right warn",L("No SIM","无 SIM 卡"));
-      else sbox(130,76,140,20,"head right",tb->carrier[0]?tb->carrier:tb->radio[0]?tb->radio:"5G");
-      for(int i=0;i<4;i++)rect(277+i*5,79+(3-i)*3,3,6+i*3,"",i<lit?tone:"#323a47");
+      if(tb->sim==0)sbox(24,76,272,20,"head warn",L("No SIM","无 SIM 卡"));
+      else sbox(24,76,272,20,"head",tb->carrier[0]?tb->carrier:tb->radio[0]?tb->radio:"5G");
     } else if(data.uptime) {
       if(data.uptime>=86400)snprintf(tmp,sizeof(tmp),L("Up %llud %lluh","已运行 %llu 天 %llu 时"),data.uptime/86400,data.uptime/3600%24);
       else snprintf(tmp,sizeof(tmp),L("Up %lluh %llum","已运行 %llu 时 %llu 分"),data.uptime/3600,data.uptime/60%60);
-      sbox(130,76,166,20,"muted right",tmp);
+      sbox(24,76,272,20,"muted",tmp);
     }
     rect(22,105,276,1,"line",NULL);
     /* The active proxy backend when the agent reports it, else WireGuard as before. */
@@ -402,19 +441,19 @@ static void build_html(void) {
     if(vis_cnt<=4) {
       for(int r=0;r<vis_cnt;r++) {
         int i=vis_idx[r];
-        nav_row(10,160+64*r,300,58,ids[i],menu_title(pages[i],0),menu_detail(pages[i]),"",1);
+        nav_row(10,160+50*r,300,48,ids[i],menu_title(pages[i],0),menu_detail(pages[i]),"",1);
       }
     } else {
-      /* Up to nine tiles: a mark, the feature and its state in a word or two. */
+      /* Two lines keep the feature and state readable with 48px touch targets. */
       int show=vis_cnt>9?9:vis_cnt;
       for(int r=0;r<show;r++) {
-        int i=vis_idx[r],x=10+(r%3)*102,y=158+(r/3)*86;
+        int i=vis_idx[r],x=10+(r%3)*102,y=158+(r/3)*50;
         const char *scls="muted";
         tile_state(pages[i],tmp,sizeof(tmp),&scls);
-        add("<a id=\"%s\" href=\"act:%s\" class=\"box tile\" style=\"left:%dpx;top:%dpx;width:96px;height:80px\">",ids[i],ids[i],x,y);
-        add("<div class=\"box icon\" style=\"left:10px;top:9px;width:76px;height:20px\">%s</div>",menu_icon(pages[i]));
-        add("<div class=\"box head\" style=\"left:10px;top:31px;width:78px;height:20px\">");shortened(menu_title(pages[i],1),78,16);
-        add("</div><div class=\"box %s\" style=\"left:10px;top:53px;width:78px;height:20px\">",scls);shortened(tmp,78,16);add("</div></a>");
+        add("<a id=\"%s\" href=\"act:%s\" class=\"box\" style=\"left:%dpx;top:%dpx;width:96px;height:48px\">",ids[i],ids[i],x,y);
+        add("<div class=\"box tile\" style=\"left:3px;top:2px;width:90px;height:44px\">");
+        add("<div class=\"box head\" style=\"left:6px;top:1px;width:78px;height:20px\">");shortened(menu_title(pages[i],1),78,16);
+        add("</div><div class=\"box %s\" style=\"left:6px;top:21px;width:78px;height:20px\">",scls);shortened(tmp,78,16);add("</div></div></a>");
       }
     }
     box(16,424,292,20,"muted",L("Power: tap to sleep, hold for menu.","电源键：短按息屏，长按关机或重启"));

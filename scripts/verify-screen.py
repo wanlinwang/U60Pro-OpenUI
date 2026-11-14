@@ -55,7 +55,7 @@ def start(seconds=120):
 config_hash=read('if test -f /data/local/tmp/openui-wireguard/config.json; then sha256sum /data/local/tmp/openui-wireguard/config.json; else printf absent; fi').split()[0]
 route=read('ip -4 route show default')
 try:
- print(read('/data/bin/openui-screen --self-test; /data/bin/openui-screen --ipc-check'),flush=True)
+ print(read('/data/bin/openui-screen --self-test && /data/bin/openui-screen --ipc-check'),flush=True)
  # Exercise the same backlight function as KEY_POWER, without injecting events
  # into the factory key daemon. End asleep to check supervisor restoration.
  assert read('/data/bin/openui-screen --power-check >/tmp/openui-screen/power-test.log 2>&1; echo $?') == '0'

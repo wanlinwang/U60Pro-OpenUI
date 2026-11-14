@@ -73,7 +73,7 @@ static void render_sms(void) {
     rect(0,0,W,48,"bar",NULL);linkbox(4,2,62,44,"back",L("‹","‹"),1,PLAIN);
     sbox(74,12,238,22,"head",sms_ui.thread_number[0]?sms_ui.thread_number:L("Unknown sender","未知号码"));
     /* When typing, keep as much of the newest conversation as fits above the keyboard. */
-    int first=0,height=0,limit=typing?160:280,bottom=typing?210:330;
+    int first=0,height=0,limit=typing?160:310,bottom=typing?210:360;
     for(int i=sms_ui.n-1;i>=0;i--){int h=sms_chat_height(&sms_ui.rows[i]);if(height+h>limit){first=i+1;break;}height+=h;}
     int y=bottom-height;for(int i=first;i<sms_ui.n;i++){sms_bubble(&sms_ui.rows[i],y);y+=sms_chat_height(&sms_ui.rows[i]);}
     if(sms_ui.load_error)box(16,120,288,44,"wrap muted",L("Unable to load conversation.","无法读取对话，请返回刷新。"));
@@ -88,13 +88,13 @@ static void render_sms(void) {
       relay_keybox(8,402,48,"rshift","Aa");relay_keybox(60,402,58,"rsymbol",relay_edit.keymode==2?"#+=":"123!?");
       relay_keybox(122,402,48,"rletters","ABC");relay_keybox(174,402,78,"rspace",L("Space","空格"));relay_keybox(256,402,56,"rbs","⌫");
     } else {
-      open_row(8,336,208,48,"sms_reply",sms_reply_number()&&!blocked(),"");
+      open_row(8,366,208,48,"sms_reply",sms_reply_number()&&!blocked(),"");
       add("<div class=\"name\" style=\"top:12px\">");
       shortened(sms_reply_number()?(sms_ui.message[0]?sms_ui.message:L("Type a message…","点击输入短信…")):L("Cannot reply","无法回复此号码"),170,16);add("</div></a>");
-      linkbox(224,336,88,48,"sms_reply_send",L("Send","发送"),sms_reply_number()&&sms_ui.message[0]&&!blocked(),PRIMARY);
-      linkbox(8,398,96,48,"sms_older",L("Earlier","更早"),sms_ui.thread_offset+1<sms_ui.total,PLAIN);
-      linkbox(112,398,96,48,"sms_newer",L("Later","更新"),sms_ui.thread_offset>0,PLAIN);
-      linkbox(216,398,96,48,"sms_thread_refresh",pending_kind==JOB_SMS_SEND||pending_kind==JOB_SMS_LIST?L("Updating","刷新中"):L("Refresh","刷新"),!blocked(),PLAIN);
+      linkbox(224,366,88,48,"sms_reply_send",L("Send","发送"),sms_reply_number()&&sms_ui.message[0]&&!blocked(),PRIMARY);
+      linkbox(8,420,96,48,"sms_older",L("Earlier","更早"),sms_ui.thread_offset+1<sms_ui.total,PLAIN);
+      linkbox(112,420,96,48,"sms_newer",L("Later","更新"),sms_ui.thread_offset>0,PLAIN);
+      linkbox(216,420,96,48,"sms_thread_refresh",pending_kind==JOB_SMS_SEND||pending_kind==JOB_SMS_LIST?L("Updating","刷新中"):L("Refresh","刷新"),!blocked(),PLAIN);
     }
     return;
   }

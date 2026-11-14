@@ -21,6 +21,17 @@ static void imei_geometry(void) {
     r[count][0]=x;r[count][1]=y;r[count][2]=w;r[count++][3]=h;
   }
 }
+static void imei_keyboard_geometry(void) {
+  const char *ids[]={"ik0","ik1","ik2","ik3","ik4","ik5","ik6","ik7","ik8","ik9","ikclear","ikbs","ikcancel","ikok"};
+  int rects[14][4];
+  for(size_t i=0;i<sizeof(ids)/sizeof(*ids);i++) {
+    char selector[24];int x,y,w,h;snprintf(selector,sizeof(selector),"#%s",ids[i]);
+    assert(html_view_rect(selector,&x,&y,&w,&h));
+    assert(x>=0&&y>=0&&w>=48&&h>=48&&x+w<=W&&y+h<=H);
+    for(size_t j=0;j<i;j++)assert(x>=rects[j][0]+rects[j][2]||x+w<=rects[j][0]||y>=rects[j][1]+rects[j][3]||y+h<=rects[j][1]);
+    rects[i][0]=x;rects[i][1]=y;rects[i][2]=w;rects[i][3]=h;
+  }
+}
 static void imei_tests(struct drm_buf *b,const char *dir) {
   struct imei_info info;
   const char *f[]={"I1","7","1","0","idle","not_checked","-","-","unknown","-","-","-","-","1","0","extra"};
@@ -38,7 +49,7 @@ static void imei_tests(struct drm_buf *b,const char *dir) {
   assert(imei_ui.sent==7&&!pending);char sent[8192];snprintf(sent,sizeof(sent),"%s",test_log);imei_tap("icheck");assert(!strcmp(sent,test_log));
   data.imei.rev=8;imei_track();assert(!imei_ui.sent);
   imei_fixture("checked","ready",IA_CHECK|IA_PREVIEW);capture_both(b,dir,"imei-checked");imei_geometry();
-  press_id(b,"iedit0");assert(imei_ui.key==0&&!imei_ui.input[0]);capture_both(b,dir,"imei-numeric-editor");
+  press_id(b,"iedit0");assert(imei_ui.key==0&&!imei_ui.input[0]);capture_both(b,dir,"imei-numeric-editor");imei_keyboard_geometry();
   const char *target="333333333333337";
   for(const char *p=target;*p;p++){char id[8];snprintf(id,sizeof(id),"ik%c",*p);press_id(b,id);}
   press_id(b,"ikok");assert(imei_ui.key==-1&&!strcmp(imei_ui.target[0],target)&&!test_request[0]);

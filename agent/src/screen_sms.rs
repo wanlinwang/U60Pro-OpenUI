@@ -216,6 +216,7 @@ const CHAT_COLUMNS: usize = 14;
 const CHAT_LINES: usize = 3;
 const CHAT_HEIGHT: usize = 190;
 const CHAT2_HEIGHT: usize = 280;
+const CHAT3_HEIGHT: usize = 310;
 struct ChatPart<'a> {
     item: &'a Item,
     text: String,
@@ -282,6 +283,13 @@ pub fn chat2(key: &str, offset: usize) -> String {
     guard.as_ref().map_or_else(
         || "CHAT unavailable\n".into(),
         |items| chat_page(items, key, offset, CHAT2_HEIGHT),
+    )
+}
+pub fn chat3(key: &str, offset: usize) -> String {
+    let guard = MESSAGES.lock().unwrap();
+    guard.as_ref().map_or_else(
+        || "CHAT unavailable\n".into(),
+        |items| chat_page(items, key, offset, CHAT3_HEIGHT),
     )
 }
 // Keep the first screen release's five-field per-message protocol intact.
@@ -424,5 +432,19 @@ mod tests {
         assert_eq!(chat_pages(&rows, "n:123", CHAT2_HEIGHT).len(), 1);
         assert!(chat_page(&rows, "n:123", 0, CHAT_HEIGHT).starts_with("CHAT 2 0\n"));
         assert!(chat_page(&rows, "n:123", 0, CHAT2_HEIGHT).starts_with("CHAT 1 0\n"));
+    }
+    #[test]
+    fn chat3_fits_six_short_messages_without_changing_older_protocols() {
+        let messages: Vec<_> = (0..6)
+            .rev()
+            .map(|i| serde_json::json!({"id":i,"number":"123","content":format!("m{i}"),"tag":1}))
+            .collect();
+        let rows = parse_items(&serde_json::json!({"messages":messages})).unwrap();
+        assert_eq!(chat_pages(&rows, "n:123", CHAT_HEIGHT).len(), 2);
+        assert_eq!(chat_pages(&rows, "n:123", CHAT2_HEIGHT).len(), 2);
+        let pages = chat_pages(&rows, "n:123", CHAT3_HEIGHT);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].len(), 6);
+        assert!(chat_page(&rows, "n:123", 0, CHAT3_HEIGHT).starts_with("CHAT 1 0\n"));
     }
 }

@@ -10,7 +10,7 @@ static void sms_tests(struct drm_buf *b,const char *dir) {
   stub_sms=list;stub_sms_thread=thread;
   test_log[0]=test_request[0]=0;press_id(b,"sms");expect_request("sms refresh\n");assert(pending_kind==JOB_SMS_LIST);
   reset_job();sms_fetch();assert(sms_ui.n==2&&!strcmp(sms_ui.rows[0].number,"+123"));
-  press_id(b,"sms_row0");assert(sms_ui.view==SMS_THREAD&&sms_ui.n==2);expect_request("sms chat2 6e3a2b313233 0\n");
+  press_id(b,"sms_row0");assert(sms_ui.view==SMS_THREAD&&sms_ui.n==2);expect_request("sms chat3 6e3a2b313233 0\n");
   render(b);assert(strstr(html,"你好")&&strstr(html,"new")&&strstr(html,"sms-in")&&strstr(html,"sms-out"));capture(b,dir,"sms-chat-synthetic");
   char body[43],hex[85],longchat[600];memset(body,'W',42);body[42]=0;relay_hex(hex,body);
   snprintf(longchat,sizeof(longchat),"CHAT 2 0\nb\t1\t1\t2\t32303235\t%s\nb\t1\t2\t2\t32303235\t%s\n.\n",hex,hex);
@@ -21,6 +21,9 @@ static void sms_tests(struct drm_buf *b,const char *dir) {
   stub_sms_thread=chinachat;sms_fetch();render(b);capture(b,dir,"sms-chat-chinese-synthetic");
   const char *five="CHAT 1 0\nb\t0\t1\t1\t32\t31\nb\t2\t1\t1\t32\t32\nb\t0\t1\t1\t32\t33\nb\t2\t1\t1\t32\t34\nb\t0\t1\t1\t32\t35\n.\n";
   stub_sms_thread=five;sms_fetch();assert(!sms_ui.load_error&&sms_ui.n==5);render(b);capture(b,dir,"sms-chat-five-synthetic");
+  const char *six="CHAT 1 0\nb\t0\t1\t1\t32\t31\nb\t2\t1\t1\t32\t32\nb\t0\t1\t1\t32\t33\nb\t2\t1\t1\t32\t34\nb\t0\t1\t1\t32\t35\nb\t2\t1\t1\t32\t36\n.\n";
+  stub_sms_thread=six;sms_fetch();assert(!sms_ui.load_error&&sms_ui.n==6);render(b);capture(b,dir,"sms-chat-six-synthetic");
+  stub_sms_legacy_agent=1;stub_sms_thread=five;sms_fetch();expect_request("sms chat2 6e3a2b313233 0\n");assert(!sms_ui.load_error&&sms_ui.n==5);stub_sms_legacy_agent=0;
   stub_sms_thread=thread;sms_fetch();
   stub_sms_thread="CHAT 2 1\nb\t0\t1\t1\t32303234\t6f6c64\n.\n";
   press_id(b,"sms_older");assert(sms_ui.thread_offset==1&&sms_ui.n==1&&!strcmp(sms_ui.rows[0].content,"old"));
