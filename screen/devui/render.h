@@ -450,25 +450,17 @@ static void build_html(void) {
     } else {
       for(int i=0;i<15;i++) if(visible_page(pages[i])) vis_idx[vis_cnt++]=i;
     }
-    if(vis_cnt<=4) {
-      for(int r=0;r<vis_cnt;r++) {
-        int i=vis_idx[r];
-        if(pages[i]==OVERVIEW)menu_overview(10,68+50*r,0);
-        else nav_row(10,68+50*r,300,48,ids[i],menu_title(pages[i],0),menu_detail(pages[i]),"",1);
-      }
-    } else {
-      /* Two lines keep the feature and state readable with 48px touch targets. */
-      int show=vis_cnt>9?9:vis_cnt;
-      for(int r=0;r<show;r++) {
-        int i=vis_idx[r],x=10+(r%3)*102,y=68+(r/3)*50;
-        if(pages[i]==OVERVIEW){menu_overview(x,y,1);continue;}
-        const char *scls="muted";
-        tile_state(pages[i],tmp,sizeof(tmp),&scls);
-        add("<a id=\"%s\" href=\"act:%s\" class=\"box\" style=\"left:%dpx;top:%dpx;width:96px;height:48px\">",ids[i],ids[i],x,y);
-        add("<div class=\"box tile\" style=\"left:3px;top:2px;width:90px;height:44px\">");
-        add("<div class=\"box head\" style=\"left:6px;top:1px;width:78px;height:20px\">");shortened(menu_title(pages[i],1),78,16);
-        add("</div><div class=\"box %s\" style=\"left:6px;top:21px;width:78px;height:20px\">",scls);shortened(tmp,78,16);add("</div></div></a>");
-      }
+    /* Always match the web editor's three-column grid. Six rows fit above the
+     * footer while keeping each touch target at least 48px high. */
+    for(int r=0;r<vis_cnt&&r<18;r++) {
+      int i=vis_idx[r],x=10+(r%3)*102,y=68+(r/3)*50;
+      if(pages[i]==OVERVIEW){menu_overview(x,y,1);continue;}
+      const char *scls="muted";
+      tile_state(pages[i],tmp,sizeof(tmp),&scls);
+      add("<a id=\"%s\" href=\"act:%s\" class=\"box\" style=\"left:%dpx;top:%dpx;width:96px;height:48px\">",ids[i],ids[i],x,y);
+      add("<div class=\"box tile\" style=\"left:3px;top:2px;width:90px;height:44px\">");
+      add("<div class=\"box head\" style=\"left:6px;top:1px;width:78px;height:20px\">");shortened(menu_title(pages[i],1),78,16);
+      add("</div><div class=\"box %s\" style=\"left:6px;top:21px;width:78px;height:20px\">",scls);shortened(tmp,78,16);add("</div></div></a>");
     }
     box(16,424,292,20,"muted",L("Power: tap to sleep, hold for menu.","电源键：短按息屏，长按关机或重启"));
     if(settings_sleep) snprintf(tmp,sizeof(tmp),L("Screen turns off after %d s idle.","空闲 %d 秒后熄屏"),settings_idle);

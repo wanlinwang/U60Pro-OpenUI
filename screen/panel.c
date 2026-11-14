@@ -68,7 +68,7 @@ struct snapshot {
   int np, battery, temperature, charging; /* charging: 1 charging, 2 full, 0 not (or an older agent) */
   unsigned long long settings_rev;
   int idle_seconds, brightness, home_page, menu_mask, zh, idle_sleep;
-  int menu_order[9], menu_order_count;
+  int menu_order[18], menu_order_count;
   unsigned long long uptime;
   double memory, cpu;
   struct profile profiles[5];
@@ -117,7 +117,7 @@ static int settings_idle = 120, settings_brightness = 128, settings_home = MENU,
 /* Screen language follows the web panel (C record); Chinese until the first record. */
 static int settings_zh = 1;
 /* An absent or invalid ordering record keeps the original menu order. */
-static int settings_order[9], settings_order_count;
+static int settings_order[18], settings_order_count;
 /* Idle action from the W record: 1 turns the screen off and stays in DevUI, 0 returns to
  * the stock UI (also with older agents, whose W records end at the language). */
 static int settings_sleep = 0;
@@ -275,7 +275,7 @@ static void rotate_frame(struct drm_buf *b) {
  * record remains usable and older agents/screens keep their original menu order. */
 static int parse_menu_order(const char *line, unsigned long long *revision, int *pages, int *count, int *mask) {
   int n = 0, pos = 0, bits = 0;
-  if (sscanf(line, "N %llu %d %n", revision, &n, &pos) != 2 || n < 1 || n > 9 || !pos) return 0;
+  if (sscanf(line, "N %llu %d %n", revision, &n, &pos) != 2 || n < 1 || n > 18 || !pos) return 0;
   const char *cursor = line + pos;
   for (int i = 0; i < n; i++) {
     while (*cursor == ' ') cursor++;
@@ -294,7 +294,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
   struct snapshot s = {.battery = -1, .temperature = -999, .memory = -1};
   char *save, *line = strtok_r(buf, "\n", &save);
   int imei_seen = 0, imei_bad = 0;
-  int order_seen = 0, order_ok = 0, order_count = 0, order_mask = 0, order_pages[9] = {0};
+  int order_seen = 0, order_ok = 0, order_count = 0, order_mask = 0, order_pages[18] = {0};
   unsigned long long order_rev = 0;
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
   int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0, w_sleep = 0;
@@ -1953,7 +1953,7 @@ static void esim_tests(struct drm_buf *b,const char *dir) {
   settings_zh=0;capture(b,dir,"en-menu-sleep");assert(strstr(html,"Screen turns off after 90 s idle."));settings_zh=1;
   assert(parse_snapshot(bad_sleep,&prefs)&&update_settings(&prefs)&&!settings_sleep&&settings_menu==80);
   settings_zh=1;settings_menu=208;
-  page=MENU;capture_both(b,dir,"menu-esim");assert(strstr(html,"act:esim")&&strstr(html,"Hong Kong"));
+  page=MENU;capture_both(b,dir,"menu-esim");assert(strstr(html,"act:esim")&&strstr(html,"HK"));
   test_request[0]=0;press_id(b,"esim");assert(page==ESIM&&!test_request[0]);capture_both(b,dir,"esim");
   /* The enabled profile is not tappable; another asks first, then names it by index. */
   press_id(b,"e0");assert(!dialog);
@@ -2152,7 +2152,7 @@ static void uplink_tests(struct drm_buf *b,const char *dir) {
   const char *overview_link=strstr(html,"id=\"overview\""),*uplink_link=strstr(html,"id=\"uplink\""),*proxy_link=strstr(html,"id=\"proxy\"");
   assert(overview_link&&uplink_link&&proxy_link&&overview_link<uplink_link&&uplink_link<proxy_link);
   settings_menu=464;
-  page=MENU;capture_both(b,dir,"menu-uplink");assert(strstr(html,"act:uplink")&&strstr(html,"Hotel"));
+  page=MENU;capture_both(b,dir,"menu-uplink");assert(strstr(html,"act:uplink")&&strstr(html,"On Wi-Fi"));
   press_id(b,"uplink");assert(page==UPLINK);capture_both(b,dir,"uplink");
   assert(strstr(html,"192.168.50.23")&&strstr(html,"Wi-Fi upstream connected.")&&strstr(html,"Routing policy: see OpenUI")&&strstr(html,"-58 dBm"));
   assert(!strstr(html,"All traffic")&&!strstr(html,"Traffic: Wi-Fi"));
@@ -2467,6 +2467,17 @@ int main(int argc, char **argv) {
     render(&b);
     const char *ts=strstr(html,"act:tailscale");proxy=strstr(html,"act:proxy");overview=strstr(html,"act:overview");
     assert(ts&&proxy&&overview&&ts<proxy&&proxy<overview);
+    /* All 15 currently available features fit in order and remain tappable. */
+    char all[]="K 34 120 128 2 65531 zh 1\nN 34 15 15 14 13 12 11 10 9 8 7 6 5 4 3 1 0\n.\n";
+    assert(parse_snapshot(all,&ordered)&&ordered.menu_order_count==15&&update_settings(&ordered));
+    page=MENU;capture_both(&b,argv[1],"menu-all-features");
+    const char *all_ids[]={"sms","tailscale","booster","power","usb","signal","wifi","uplink","esim","clash","proxy","overview","profiles","devices","wireguard"};
+    for(int i=0;i<15;i++) {
+      char selector[32];int x,y,w,h;snprintf(selector,sizeof(selector),"#%s",all_ids[i]);
+      assert(html_view_rect(selector,&x,&y,&w,&h));
+      assert(x==10+(i%3)*102&&y==68+(i/3)*50&&w>=48&&h>=48&&x+w<=W&&y+h<424);
+    }
+    press_id(&b,"wireguard");assert(page==WG);page=MENU;
     char duplicate[]="V 32 120 128 2 112 zh\nN 32 3 6 6 4\n.\n";
     char wrong_rev[]="V 32 120 128 2 112 zh\nN 31 3 6 4 5\n.\n";
     char partial[]="V 32 120 128 2 112 zh\nN 32 2 6 4\n.\n";

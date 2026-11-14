@@ -123,7 +123,8 @@ the touchscreen preview build); none show a real device.
 - **Logs and diagnostics**: rotating router log (relay, Tailscale and blocklist events),
   signal and connection-event loggers with CSV download, AT console.
 - **Touchscreen menu (DevUI)**: a menu on the device's 320×480 screen in the dashboard's
-  language, with up to nine features (five or more as a 3×3 grid) chosen on the web page.
+  language, with three columns and up to six rows (15 features are currently available).
+  Drag cards on the web page to choose and order them.
   See [screen documentation](docs/SCREEN.md).
 - **Checked deployment**: every deployment verifies the device and each file's checksum,
   keeps a snapshot and attempts recovery on observed deployment failures, not exact

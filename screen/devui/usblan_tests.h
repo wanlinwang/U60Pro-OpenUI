@@ -41,7 +41,7 @@ static void usblan_tests(struct drm_buf *b,const char *dir) {
   usblan_fixture("\t1\t1\trndis0");
   /* The menu has no carrier card; signal bars remain (-88 dBm is three bars).
    * Select only Overview so the Signal tile cannot itself display No SIM. */
-  int saved_menu=settings_menu,saved_order_count=settings_order_count,saved_zh=settings_zh,saved_order[9];
+  int saved_menu=settings_menu,saved_order_count=settings_order_count,saved_zh=settings_zh,saved_order[18];
   memcpy(saved_order,settings_order,sizeof(saved_order));settings_order_count=0;
   settings_menu=1<<OVERVIEW;
   usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18\tT-Mobile");page=MENU;

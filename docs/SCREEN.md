@@ -104,13 +104,17 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 | Idle time | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
 | When idle | Turn the screen off and stay in DevUI (default), or return to the stock UI |
 | Startup page | Main menu or any visible feature; applies on the next opening |
-| Menu features | Up to nine of Overview, Proxy, WireGuard, Clash, eSIM, Wi-Fi relay, Wi-Fi, Signal, USB & TTL, Battery & charge, Booster, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
+| Menu features | Up to 18 tiles in three columns and six rows; the 15 available features include Overview, Proxy, WireGuard, Clash, Tailscale, SMS, eSIM and the other device controls. The default is Overview, Proxy, WireGuard and Clash. |
 
-Drag enabled features by their handles in **DevUI → Menu features**, or use the up / down buttons, then save the settings to apply their order on the device. Ordering requires an updated agent and screen component; older screens keep their original order.
+In **DevUI → Menu features**, drag one tile between the display and candidate areas,
+or drag within the display area to change its position. The + and − controls also
+move tiles, and arrow keys reorder the focused display tile. Save the settings to
+apply the previewed order on the device. Both the agent and screen component must be
+updated for more than nine items and the three-column layout.
 
-At least one feature must remain visible and at most nine fit the menu: up to four show
-as rows, five to nine as a 3×3 grid of tiles (the toolbox). The DevUI webpage has a
-toolbox preset and a classic four-row preset. A saved list
+At least one feature must remain visible. The menu always uses three columns, with up
+to six rows; the current release has 15 available features. The DevUI webpage has a
+toolbox preset and a classic four-feature preset. A saved list
 of exactly the four old defaults moves to the new default once. Saved profiles and
 Device routing stay reachable from the WireGuard page even when hidden from the menu.
 **Stock UI** and **Back** are always available. Hiding a feature only changes the screen menu; it does not disable its

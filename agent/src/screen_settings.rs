@@ -13,7 +13,7 @@ const FILE: &str = "/data/local/tmp/openui-devui/settings.json";
 /// Present once settings have been checked for the pre-proxy menu, so an owner who picks
 /// the old four features again keeps them.
 const MIGRATED: &str = "/data/local/tmp/openui-devui/menu-v2";
-/// Features the screen menu can show, in menu order; at most nine at a time (up to a 3x3 Pocket OS grid).
+/// Features the screen menu can show, in menu order, in a grid of up to 3x6 tiles.
 const MENU_ITEMS: [&str; 15] = [
     "overview",
     "proxy",
@@ -120,9 +120,9 @@ impl Settings {
         if self.menu_items.is_empty() {
             return Err("Choose at least one menu item");
         }
-        // The screen has room for up to nine menu tiles (2x2 or 3x3 grid).
-        if self.menu_items.len() > 9 {
-            return Err("Choose at most nine menu items");
+        // The screen has room for six rows of three tiles.
+        if self.menu_items.len() > 18 {
+            return Err("Choose at most eighteen menu items");
         }
         let mut seen = std::collections::HashSet::new();
         for item in &self.menu_items {
@@ -437,7 +437,16 @@ mod tests {
                     "devices",
                     "signal",
                     "wifi",
-                    "power"
+                    "power",
+                    "tailscale",
+                    "sms",
+                    "uplink",
+                    "usb",
+                    "booster",
+                    "overview",
+                    "proxy",
+                    "wireguard",
+                    "clash"
                 ]),
             ),
             ("home_page", json!("devices")),
@@ -711,7 +720,9 @@ mod tailscale_settings_tests {
             .filter(|l| !l.starts_with("F "))
             .all(|l| l.split(' ').nth(4) != Some("14")));
         assert_eq!(old.menu_items, DEFAULT_MENU.to_vec());
-        s.menu_items = MENU_ITEMS.iter().take(10).map(|s| s.to_string()).collect();
-        assert!(s.validate().is_err());
+        s.home_page = "menu".into();
+        s.menu_items = MENU_ITEMS.iter().map(|s| s.to_string()).collect();
+        assert_eq!(s.menu_items.len(), 15);
+        assert!(s.validate().is_ok());
     }
 }

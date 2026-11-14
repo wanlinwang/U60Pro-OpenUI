@@ -5,7 +5,7 @@ import { Button, Select, Toggle } from '../../ui/controls'
 import { Card, Chip, PageHeader } from '../../ui/primitives'
 import { confirm } from '../../ui/feedback'
 import { N_, t, tm } from '../../i18n'
-import { moveMenuItem } from './menuOrder'
+import MenuGrid from './MenuGrid'
 
 const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'overview', title: N_('Overview'), description: N_('Battery, temperature, uptime and system load') },
@@ -24,8 +24,6 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'profiles', title: N_('Saved profiles'), description: N_('Switch between your saved VPN profiles') },
   { id: 'devices', title: N_('Device routing'), description: N_('Choose which devices use WireGuard') },
 ]
-/** Up to 9 features fit the 3×3 grid (1–4 items render as list rows). */
-const MAX_MENU_ITEMS = 9
 const GRID_PRESET: DevUIPageId[] = ['overview', 'proxy', 'wifi', 'signal', 'usb', 'power', 'booster', 'clash', 'esim']
 const CLASSIC_PRESET: DevUIPageId[] = ['overview', 'proxy', 'clash', 'esim']
 // i18n-ignore: each language is named in its own language
@@ -39,12 +37,10 @@ export default function DevUIPage() {
   const [error, setError] = useState('')
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState('')
-  const [dragTarget, setDragTarget] = useState<DevUIPageId | null>(null)
   const mutating = useRef(false)
   const editing = useRef(false)
   const mounted = useRef(false)
   const generation = useRef(0)
-  const draggingMenu = useRef<DevUIPageId | null>(null)
   useEffect(() => {
     mounted.current = true
     let reading = false
@@ -93,14 +89,6 @@ export default function DevUIPage() {
     } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : t('Screen action failed')) }
     finally { generation.current++; mutating.current = false; if (mounted.current) setBusy(false) }
   }
-  function moveMenu(from: DevUIPageId, to: DevUIPageId) {
-    if (!draft || busy) return
-    const items = moveMenuItem(draft.menu_items, from, to)
-    if (items !== draft.menu_items) edit({ menu_items: items })
-  }
-  const orderedPages = draft
-    ? [...draft.menu_items.flatMap(id => pages.filter(p => p.id === id)), ...pages.filter(p => !draft.menu_items.includes(p.id))]
-    : pages
   const stale = draft && settings && draft.revision !== settings.revision
   return <div className="space-y-4">
     <PageHeader title="DevUI" sub={t('Device screen, ways to open it and live menu settings')} />
@@ -132,21 +120,10 @@ export default function DevUIPage() {
         <div className="block text-[13px] text-ink">{t('Screen language')}<span className="float-right">{LANGUAGES[draft.language ?? 'zh']}</span><span className="mt-2 block text-xs text-ink3">{t('Follows the language switch of this panel.')}</span></div>
       </div> : <p className="text-sm text-ink2">{t('Loading display preferences…')}</p>}
     </Card>
-    <Card title={t('Menu features')} action={<div className="flex items-center gap-1.5"><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: GRID_PRESET, home_page: 'menu' })}>{t('3×3 grid preset')}</Button><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: CLASSIC_PRESET, home_page: 'menu' })}>{t('Classic 4-row preset')}</Button></div>}>
-      <p className="mb-3 text-xs text-ink2">{t('Choose the controls shown on the device. Hiding a menu item does not disable its network feature. Stock UI and Back remain available.')} {t('Up to 9 features fit the 3×3 grid (1–4 items use rows). Saved profiles and Device routing stay reachable from the WireGuard page.')}</p>
-      <p className="mb-2 text-xs text-ink2">{t('Drag enabled features by the handle or use the arrows to change their order. Save to apply it to the device screen.')}</p>
-      <div className="divide-y divide-line/10">{orderedPages.map(p => {
-        const index = draft?.menu_items.indexOf(p.id) ?? -1
-        const enabled = index >= 0
-        return <div key={p.id} data-menu-feature={p.id} className={`flex items-center gap-2 py-3 ${dragTarget === p.id ? 'bg-accent/5' : ''}`}>
-          <button type="button" className="touch-none rounded px-2 py-2 text-ink2 enabled:cursor-grab enabled:active:cursor-grabbing disabled:opacity-30" aria-label={t('Drag {name} to reorder', { name: t(p.title) })} disabled={busy || !enabled} onPointerDown={e => { if (e.button !== 0) return; draggingMenu.current = p.id; setDragTarget(p.id); e.currentTarget.setPointerCapture(e.pointerId) }} onPointerMove={e => { if (!draggingMenu.current) return; const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-menu-feature]'); const target = row?.dataset.menuFeature as DevUIPageId | undefined; setDragTarget(target && draft?.menu_items.includes(target) ? target : null) }} onPointerUp={e => { const from = draggingMenu.current; const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-menu-feature]'); const target = row?.dataset.menuFeature as DevUIPageId | undefined; draggingMenu.current = null; setDragTarget(null); if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); if (from && target) moveMenu(from, target) }} onPointerCancel={() => { draggingMenu.current = null; setDragTarget(null) }} onLostPointerCapture={() => { draggingMenu.current = null; setDragTarget(null) }}>⠿</button>
-          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"><input type="checkbox" className="h-4 w-4 accent-accent" checked={enabled} disabled={busy || !draft || (!enabled && draft.menu_items.length >= MAX_MENU_ITEMS)} onChange={e => { if (!draft) return; const items = e.target.checked ? [...draft.menu_items, p.id] : draft.menu_items.filter(id => id !== p.id); edit({ menu_items: items, home_page: draft.home_page !== 'menu' && !items.includes(draft.home_page) ? 'menu' : draft.home_page }) }} /><span><span className="block text-[13px] font-medium text-ink">{t(p.title)}</span><span className="text-xs text-ink2">{t(p.description)}</span></span></label>
-          <div className="flex shrink-0 gap-1">
-            <button type="button" className="rounded px-2 py-1 text-ink2 disabled:opacity-30" aria-label={t('Move {name} up', { name: t(p.title) })} disabled={busy || index <= 0} onClick={() => { if (draft && index > 0) moveMenu(p.id, draft.menu_items[index - 1]) }}>↑</button>
-            <button type="button" className="rounded px-2 py-1 text-ink2 disabled:opacity-30" aria-label={t('Move {name} down', { name: t(p.title) })} disabled={busy || !draft || index < 0 || index === draft.menu_items.length - 1} onClick={() => { if (draft && index >= 0 && index < draft.menu_items.length - 1) moveMenu(p.id, draft.menu_items[index + 1]) }}>↓</button>
-          </div>
-        </div>
-      })}</div>
+    <Card title={t('Menu features')} action={<div className="flex flex-wrap items-center gap-1.5"><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: GRID_PRESET, home_page: 'menu' })}>{t('3×3 grid preset')}</Button><Button variant="outline" disabled={busy || !draft} onClick={() => edit({ menu_items: CLASSIC_PRESET, home_page: 'menu' })}>{t('Classic four-feature preset')}</Button></div>}>
+      <p className="mb-2 text-xs text-ink2">{t('Drag one card between areas or reorder it in the display area. You can also use + / − or the arrow keys. Save to apply the changes.')}</p>
+      <p className="mb-4 text-xs text-ink3">{t('The display uses three columns and up to six rows. Status values appear on the device. Hiding a card does not disable its feature.')}</p>
+      {draft ? <MenuGrid pages={pages} items={draft.menu_items} disabled={busy} onChange={items => edit({ menu_items: items, home_page: draft.home_page !== 'menu' && !items.includes(draft.home_page) ? 'menu' : draft.home_page })} /> : <p className="text-sm text-ink2">{t('Loading display preferences…')}</p>}
     </Card>
     <div className="sticky bottom-2 rounded-xl border border-line/10 bg-surface p-3 shadow-sm">
       {stale && <p role="alert" className="mb-2 text-xs text-danger">{t('Settings changed in another session. Reload before saving.')}</p>}

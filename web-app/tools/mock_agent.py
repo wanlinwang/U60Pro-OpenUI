@@ -1553,8 +1553,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send({"ok": False, "error": "DevUI settings changed. Reload before saving."}, 409)
             if not 20 <= body.get("brightness", 0) <= 255 or not 30 <= body.get("idle_seconds", 0) <= 600 or not body.get("menu_items"):
                 return self._send({"ok": False, "error": "Invalid DevUI settings"}, 400)
-            if len(body["menu_items"]) > 4:
-                return self._send({"ok": False, "error": "Choose at most four menu items"}, 400)
+            if len(body["menu_items"]) > 18:
+                return self._send({"ok": False, "error": "Choose at most eighteen menu items"}, 400)
+            allowed = {"overview", "proxy", "wireguard", "clash", "tailscale", "sms", "esim", "uplink", "wifi", "signal", "usb", "power", "booster", "profiles", "devices"}
+            if len(set(body["menu_items"])) != len(body["menu_items"]) or not set(body["menu_items"]).issubset(allowed):
+                return self._send({"ok": False, "error": "Invalid or duplicate menu item"}, 400)
+            if body.get("home_page") != "menu" and body.get("home_page") not in body["menu_items"]:
+                return self._send({"ok": False, "error": "The startup page must be visible in the menu"}, 400)
             if any(k in body and not isinstance(body[k], bool) for k in ("touch_enabled", "open_at_boot", "idle_sleep")):
                 return self._send({"ok": False, "error": "Invalid DevUI settings"}, 400)
             STATE["screen_settings"] = {k: body.get(k, old[k]) for k in old if k != "revision"}
