@@ -13,6 +13,7 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'wireguard', title: N_('WireGuard'), description: N_('Tunnel status, traffic and on / off control') },
   { id: 'clash', title: N_('Clash'), description: N_('Status, proxy mode, nodes and delay tests, subscriptions, core and geo data') },
   { id: 'tailscale', title: N_('Tailscale'), description: N_('Status, connect / disconnect and online exit selection; enrollment is separate') },
+  { id: 'sms', title: N_('SMS'), description: N_('Read and send text messages') },
   { id: 'esim', title: N_('eSIM'), description: N_('Profiles on a removable eUICC: switch, or restart after a switch') },
   { id: 'uplink', title: N_('Wi-Fi relay'), description: N_('Upstream Wi-Fi status, signal and traffic, with on / off control') },
   { id: 'wifi', title: N_('Wi-Fi'), description: N_('2.4 GHz & 5 GHz radio switches, SSID and connected client count') },

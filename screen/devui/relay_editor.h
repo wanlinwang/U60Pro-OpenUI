@@ -1,7 +1,7 @@
 /* Relay editor: local-only state; no credential appears in status or action IDs.
  * Passwords are never read back from the agent. GPL-3.0-or-later. */
 enum { RV_STATUS, RV_SAVED, RV_SCAN, RV_DETAIL, RV_EDIT, RV_KEYBOARD };
-enum { RK_SSID, RK_PASSWORD };
+enum { RK_SSID, RK_PASSWORD, RK_SMS_TO, RK_SMS_BODY };
 struct relay_editor {
   char ssid[33], password[65], before[65];
   unsigned long long rev, gen, id;
@@ -17,13 +17,14 @@ static void relay_wipe(void *p, size_t n) {
   while (n--) *v++ = 0;
 }
 static void relay_editor_clear(void) { relay_wipe(&relay_edit,sizeof(relay_edit));relay_wipe(confirm_req,sizeof(confirm_req));relay_key_revision++;relay_key_epoch++; }
-static char *relay_input(void) { return relay_edit.key==RK_SSID?relay_edit.ssid:relay_edit.password; }
-static size_t relay_input_limit(void) { return relay_edit.key==RK_SSID?32:64; }
+static char *relay_input(void) { return relay_edit.key==RK_SMS_TO?sms_ui.number:relay_edit.key==RK_SMS_BODY?sms_ui.message:relay_edit.key==RK_SSID?relay_edit.ssid:relay_edit.password; }
+static size_t relay_input_limit(void) { return relay_edit.key==RK_SMS_BODY?160:relay_edit.key==RK_PASSWORD?64:32; }
 static void relay_key_open(int field) {
   relay_key_revision++;relay_key_epoch++;
-  relay_edit.key=field;relay_edit.keymode=0;relay_edit.show=0;relay_edit.overflow=0;
+  relay_edit.key=field;relay_edit.keymode=field==RK_SMS_TO?2:0;relay_edit.show=0;relay_edit.overflow=0;
   relay_wipe(relay_edit.before,sizeof(relay_edit.before));
   if(field==RK_SSID)snprintf(relay_edit.before,sizeof(relay_edit.before),"%s",relay_input());
+  if(field==RK_SMS_TO||field==RK_SMS_BODY)snprintf(sms_ui.before,sizeof(sms_ui.before),"%s",relay_input());
   relay_view=RV_KEYBOARD;
 }
 /* Only printable ASCII can be entered. UTF-8 SSIDs selected from a list are preserved
@@ -35,6 +36,7 @@ static int relay_ascii(const char *s) {
 static void relay_key_char(unsigned c) {
   char *s=relay_input();size_t n=strlen(s);
   if(c<32||c>126)return;
+  if(relay_edit.key==RK_SMS_TO&&!((c>='0'&&c<='9')||c=='+'||c=='*'||c=='#'))return;
   relay_key_revision++;
   if(n>=relay_input_limit()){relay_edit.overflow=1;return;}
   s[n]=(char)c;s[n+1]=0;relay_edit.overflow=0;
@@ -85,14 +87,15 @@ static int relay_keyboard_tap(const char *a) {
     if(relay_edit.key==RK_PASSWORD)relay_edit.keep=0;
   } else if(!strcmp(a,"rshow"))relay_edit.show=!relay_edit.show;
   else if(!strcmp(a,"rkdone")) {
-    relay_wipe(relay_edit.before,sizeof(relay_edit.before));relay_edit.show=0;relay_view=RV_EDIT;
+    relay_wipe(relay_edit.before,sizeof(relay_edit.before));relay_wipe(sms_ui.before,sizeof(sms_ui.before));relay_edit.show=0;relay_view=RV_EDIT;
   } else if(!strcmp(a,"rkcancel")||!strcmp(a,"back")) {
     /* Cancel never restores a password into memory: keeping an existing saved secret
      * is explicit on the form. Cancelling an SSID field restores its prior bytes. */
     relay_wipe(relay_input(),relay_input_limit()+1);
     if(relay_edit.key==RK_SSID)snprintf(relay_edit.ssid,sizeof(relay_edit.ssid),"%s",relay_edit.before);
+    else if(relay_edit.key==RK_SMS_TO||relay_edit.key==RK_SMS_BODY)snprintf(relay_input(),relay_input_limit()+1,"%s",sms_ui.before);
     else relay_edit.keep=relay_edit.saved&&relay_edit.has_secret&&relay_edit.security==relay_edit.original_security;
-    relay_wipe(relay_edit.before,sizeof(relay_edit.before));relay_edit.show=0;relay_view=RV_EDIT;
+    relay_wipe(relay_edit.before,sizeof(relay_edit.before));relay_wipe(sms_ui.before,sizeof(sms_ui.before));relay_edit.show=0;relay_view=RV_EDIT;
   }
   return 1;
 }

@@ -210,6 +210,7 @@ static void dialog_card(int y, int h) {
 }
 #include "pages.h"
 #include "imei_pages.h"
+#include "sms_pages.h"
 /* Main menu features: their names (shorter on a tile), marks, row details and the word
  * or two a tile shows. */
 static const char *menu_title(int p, int tile) {
@@ -219,6 +220,7 @@ static const char *menu_title(int p, int tile) {
   case WG: return "WireGuard";
   case CLASH: return "Clash";
   case TAILSCALE: return "Tailscale";
+  case SMS_PAGE: return L("SMS","短信");
   case ESIM: return "eSIM";
   case UPLINK: return L("Wi-Fi relay","无线中继");
   case WIFI_PAGE: return "Wi-Fi";
@@ -237,6 +239,7 @@ static const char *menu_icon(int p) {
   case WG: return "&#9919;";            /* ⚿ */
   case CLASH: return "&#10022;";        /* ✦ */
   case TAILSCALE: return "&#8644;";
+  case SMS_PAGE: return "&#9993;";
   case ESIM: return "&#9635;";          /* ▣ */
   case UPLINK: return "&#8673;";        /* ⇡ */
   case WIFI_PAGE: return "&#8779;";     /* ≋ */
@@ -257,6 +260,7 @@ static const char *menu_detail(int p) {
   case WG: return L("Tunnel status and on / off","隧道状态与开关");
   case CLASH: return L("Nodes, subscriptions and core","节点、订阅与内核");
   case TAILSCALE: return ts_summary();
+  case SMS_PAGE: return L("Read and send messages","查看和发送短信");
   case ESIM: return esim_summary();
   case UPLINK: return uplink_summary();
   case WIFI_PAGE: return L("Bands and connected clients","频段开关与在线终端");
@@ -280,6 +284,7 @@ static void tile_state(int p, char *buf, size_t n, const char **cls) {
   case WG: *cls=summary_class(); snprintf(buf,n,"%s",summary()); return;
   case CLASH: *cls=data.clash.has?clash_class():"muted"; snprintf(buf,n,"%s",data.clash.has?clash_summary():"--"); return;
   case TAILSCALE: snprintf(buf,n,"%s",ts_summary()); return;
+  case SMS_PAGE: snprintf(buf,n,"%s",L("Messages","短信")); return;
   case ESIM:
     if(data.esim.has&&!strcmp(data.esim.card,"euicc"))snprintf(buf,n,"%s",esim_summary());
     else snprintf(buf,n,"%s",data.esim.has&&!strcmp(data.esim.card,"sim")?L("SIM card","普通 SIM"):"--");
@@ -385,14 +390,14 @@ static void build_html(void) {
       snprintf(rates,sizeof(rates),"↓%s ↑%s",d_rate,u_rate);
       sbox(190,116,106,20,"muted right",rates);
     } else sbox(42,116,room,20,rx,tmp);
-    const int pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,PROFILES,DEVICES};
-    const char *ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","profiles","devices"};
-    int vis_idx[14], vis_cnt=0;
+    const int pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,SMS_PAGE,PROFILES,DEVICES};
+    const char *ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","sms","profiles","devices"};
+    int vis_idx[15], vis_cnt=0;
     if(settings_order_count) {
       for(int r=0;r<settings_order_count;r++)
-        for(int i=0;i<14;i++) if(pages[i]==settings_order[r] && visible_page(pages[i])) vis_idx[vis_cnt++]=i;
+        for(int i=0;i<15;i++) if(pages[i]==settings_order[r] && visible_page(pages[i])) vis_idx[vis_cnt++]=i;
     } else {
-      for(int i=0;i<14;i++) if(visible_page(pages[i])) vis_idx[vis_cnt++]=i;
+      for(int i=0;i<15;i++) if(visible_page(pages[i])) vis_idx[vis_cnt++]=i;
     }
     if(vis_cnt<=4) {
       for(int r=0;r<vis_cnt;r++) {
@@ -519,6 +524,7 @@ static void build_html(void) {
   else if(page==DIAG) render_diag();
   else if(page==CFOPT) render_cfopt();
   else if(page==TAILSCALE) render_tailscale();
+  else if(page==SMS_PAGE) render_sms();
   else if(page==ESIM) render_esim();
   else if(page==UPLINK) render_uplink();
   else if(page==WIFI_PAGE) render_wifi();
@@ -540,7 +546,7 @@ static struct {
 /* Non-secret work counters for preview tests and the native synthetic benchmark. */
 static unsigned long long relay_keyboard_scaffold_draws,relay_keyboard_dynamic_draws;
 static int relay_keyboard_active(void) {
-  return page==UPLINK&&relay_view==RV_KEYBOARD&&relay_edit.active&&!dialog;
+  return (page==UPLINK||page==SMS_PAGE)&&relay_view==RV_KEYBOARD&&relay_edit.active&&!dialog;
 }
 static int relay_keyboard_same_scaffold(void) {
   return relay_keyboard_cache.valid&&relay_keyboard_cache.epoch==relay_key_epoch&&

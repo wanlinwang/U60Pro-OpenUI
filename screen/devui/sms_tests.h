@@ -1,0 +1,51 @@
+/* SCREEN_PREVIEW only: synthetic SMS data and mock IPC. */
+static void sms_tests(struct drm_buf *b,const char *dir) {
+  char snapshot[512];
+  snprintf(snapshot,sizeof(snapshot),"S 7 1 0 0 0 0 0 0 1 %llu\nF 4 120 128 2 16384 zh 1\nK 4 120 128 15 49152 zh 1\nF 4 120 128 14 16384 zh 1\nN 4 2 15 14\n",(unsigned long long)time(NULL));
+  assert(parse_snapshot(snapshot,&data));
+  assert(data.home_page==SMS_PAGE&&data.menu_mask==49152&&data.menu_order_count==2&&data.menu_order[0]==SMS_PAGE);
+  settings_menu=1<<SMS_PAGE;settings_zh=1;page=MENU;dialog=0;reset_job();stub_job="OK 1\n";
+  const char *list="SMS 2 0\nm\t2\t6e3a2b313233\t2b313233\t32303236\t6e6577\nm\t1\t6e3a393939\t393939\t32303236\t6f74686572\n.\n";
+  const char *thread="CHAT 2 0\nb\t1\t1\t1\t32303235\te4bda0e5a5bd\nb\t2\t1\t1\t32303236\t6e6577\n.\n";
+  stub_sms=list;stub_sms_thread=thread;
+  test_log[0]=test_request[0]=0;press_id(b,"sms");expect_request("sms refresh\n");assert(pending_kind==JOB_SMS_LIST);
+  reset_job();sms_fetch();assert(sms_ui.n==2&&!strcmp(sms_ui.rows[0].number,"+123"));
+  press_id(b,"sms_row0");assert(sms_ui.view==SMS_THREAD&&sms_ui.n==2);expect_request("sms chat2 6e3a2b313233 0\n");
+  render(b);assert(strstr(html,"你好")&&strstr(html,"new")&&strstr(html,"sms-in")&&strstr(html,"sms-out"));capture(b,dir,"sms-chat-synthetic");
+  char body[43],hex[85],longchat[600];memset(body,'W',42);body[42]=0;relay_hex(hex,body);
+  snprintf(longchat,sizeof(longchat),"CHAT 2 0\nb\t1\t1\t2\t32303235\t%s\nb\t1\t2\t2\t32303235\t%s\n.\n",hex,hex);
+  stub_sms_thread=longchat;sms_fetch();render(b);int seen=0;const char *scan=html;while((scan=strstr(scan,"WWWWWWWWWWWWWW"))){seen++;scan+=14;}
+  assert(seen==6);capture(b,dir,"sms-chat-long-synthetic");
+  char chinese[127]={0},chex[253],chinachat[400];for(int i=0;i<42;i++)strcat(chinese,"中");relay_hex(chex,chinese);
+  snprintf(chinachat,sizeof(chinachat),"CHAT 1 0\nb\t1\t1\t1\t32303235\t%s\n.\n",chex);
+  stub_sms_thread=chinachat;sms_fetch();render(b);capture(b,dir,"sms-chat-chinese-synthetic");
+  const char *five="CHAT 1 0\nb\t0\t1\t1\t32\t31\nb\t2\t1\t1\t32\t32\nb\t0\t1\t1\t32\t33\nb\t2\t1\t1\t32\t34\nb\t0\t1\t1\t32\t35\n.\n";
+  stub_sms_thread=five;sms_fetch();assert(!sms_ui.load_error&&sms_ui.n==5);render(b);capture(b,dir,"sms-chat-five-synthetic");
+  stub_sms_thread=thread;sms_fetch();
+  stub_sms_thread="CHAT 2 1\nb\t0\t1\t1\t32303234\t6f6c64\n.\n";
+  press_id(b,"sms_older");assert(sms_ui.thread_offset==1&&sms_ui.n==1&&!strcmp(sms_ui.rows[0].content,"old"));
+  stub_sms_thread=thread;press_id(b,"sms_newer");assert(sms_ui.thread_offset==0&&sms_ui.n==2);
+  test_log[0]=test_request[0]=0;press_id(b,"sms_reply");
+  assert(sms_ui.view==SMS_THREAD&&sms_keyboard_inline());render(b);assert(strstr(html,"你好")&&strstr(html,"new")&&strstr(html,"sms_reply_send"));
+  uint16_t *reference=malloc(W*H*2);assert(reference);assert(render_changed(b,1));relay_render_reference(b,reference);
+  relay_cached_press(b,"rshift",1,reference);relay_cached_press(b,"rk48",0,reference);
+  relay_cached_press(b,"rshift",1,reference);relay_cached_press(b,"rk69",0,reference);
+  relay_cached_press(b,"rsymbol",1,reference);relay_cached_press(b,"rk21",0,reference);
+  free(reference);track_status(0);assert(relay_edit.active&&relay_view==RV_KEYBOARD&&!strcmp(sms_ui.message,"Hi!"));capture(b,dir,"sms-inline-keyboard-synthetic");
+  relay_press(b,"sms_reply_send");assert(sms_ui.view==SMS_CONFIRM&&sms_ui.from_thread&&!strstr(test_log,"sms send"));capture(b,dir,"sms-reply-confirm-synthetic");
+  press_id(b,"sms_edit");assert(sms_ui.view==SMS_THREAD&&!strcmp(sms_ui.message,"Hi!"));press_id(b,"sms_reply");relay_press(b,"back");
+  assert(sms_ui.view==SMS_THREAD&&relay_view!=RV_KEYBOARD&&!strcmp(sms_ui.message,"Hi!"));press_id(b,"sms_reply_send");
+  press_id(b,"sms_send");expect_request("sms send 2b313233 486921\n");assert(pending_kind==JOB_SMS_SEND&&!sms_ui.number[0]&&!sms_ui.message[0]&&sms_ui.view==SMS_THREAD);
+  data.job=data.done=data.fresh=1;data.has_fresh=1;data.result=0;data.busy=0;settle_jobs();
+  assert(sms_ui.view==SMS_THREAD&&pending_kind==JOB_SMS_LIST);expect_request("sms refresh\n");
+  reset_job();sms_fetch();press_id(b,"sms_thread_refresh");expect_request("sms refresh\n");reset_job();
+  snprintf(sms_ui.thread_key,sizeof(sms_ui.thread_key),"a:Service");assert(!sms_reply_number());
+  relay_press(b,"back");assert(sms_ui.view==SMS_LIST&&sms_ui.n==2);
+  stub_sms="SMS unavailable\n";sms_fetch();assert(sms_ui.load_error);render(b);assert(strstr(html,"无法读取短信"));stub_sms=list;sms_fetch();
+  press_id(b,"sms_new");press_id(b,"sms_to");relay_type(b,"12");press_id(b,"rkdone");press_id(b,"sms_body");relay_type(b,"Hi!");press_id(b,"rkdone");
+  press_id(b,"sms_preview");assert(sms_ui.view==SMS_CONFIRM&&!sms_ui.from_thread);
+  memset(sms_ui.number,'8',32);sms_ui.number[32]=0;memset(sms_ui.message,'W',160);sms_ui.message[160]=0;capture(b,dir,"sms-confirm-long-synthetic");
+  snprintf(sms_ui.number,sizeof(sms_ui.number),"12");snprintf(sms_ui.message,sizeof(sms_ui.message),"Hi!");press_id(b,"sms_send");expect_request("sms send 3132 486921\n");
+  reset_job();press_id(b,"back");assert(page==MENU&&!sms_ui.rows[0].content[0]);expect_request("sms clear\n");
+  stub_sms=stub_sms_thread=NULL;reset_job();test_log[0]=test_request[0]=0;
+}

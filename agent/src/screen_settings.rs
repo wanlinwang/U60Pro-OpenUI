@@ -14,12 +14,13 @@ const FILE: &str = "/data/local/tmp/openui-devui/settings.json";
 /// the old four features again keeps them.
 const MIGRATED: &str = "/data/local/tmp/openui-devui/menu-v2";
 /// Features the screen menu can show, in menu order; at most nine at a time (up to a 3x3 Pocket OS grid).
-const MENU_ITEMS: [&str; 14] = [
+const MENU_ITEMS: [&str; 15] = [
     "overview",
     "proxy",
     "wireguard",
     "clash",
     "tailscale",
+    "sms",
     "esim",
     "uplink",
     "wifi",
@@ -104,6 +105,7 @@ fn page_number(s: &str) -> u32 {
         "power" => 12,
         "booster" => 13,
         "tailscale" => 14,
+        "sms" => 15,
         _ => 2,
     }
 }
@@ -164,7 +166,22 @@ impl Settings {
             .iter()
             .fold(0u32, |m, s| m | (1 << page_number(s)));
         let home = page_number(&self.home_page);
-        // F adds Tailscale; older Z readers must never receive its bit/home.
+        // K (space-delimited) extends F with SMS; old screens ignore it.
+        let sms = if mask & (1 << 15) != 0 {
+            format!(
+                "K {} {} {} {home} {mask} {} {}\n",
+                self.revision,
+                self.idle_seconds,
+                self.brightness,
+                self.language,
+                u8::from(self.idle_sleep)
+            )
+        } else {
+            String::new()
+        };
+        // F adds Tailscale; older screens must not receive the SMS bit/home.
+        let mask = mask & !(1 << 15);
+        let home = if home == 15 { 2 } else { home };
         let ts = if mask & (1 << 14) != 0 {
             format!(
                 "F {} {} {} {home} {mask} {} {}\n",
@@ -222,7 +239,7 @@ impl Settings {
                 line('Z', home, mask),
             )
         };
-        legacy + &ts
+        legacy + &ts + &sms
     }
 }
 /// Settings saved with the old default menu showed every feature there was; they get the
@@ -661,6 +678,23 @@ mod tailscale_settings_tests {
             .to_vec();
         assert_eq!(settings.menu_order_record(), "N 8 3 6 4 14\n");
         assert!(settings.validate().is_ok());
+    }
+    #[test]
+    fn sms_settings_preserve_legacy_records_and_menu_order() {
+        let mut s = Settings::default();
+        s.menu_items = ["sms", "overview", "tailscale"].map(String::from).to_vec();
+        s.home_page = "sms".into();
+        assert!(s.validate().is_ok());
+        assert_eq!(s.menu_order_record(), "N 1 3 15 4 14\n");
+        let projection = s.projection();
+        assert!(projection.ends_with("K 1 120 128 15 49168 zh 1\n"));
+        assert!(projection
+            .lines()
+            .filter(|line| !line.starts_with("K "))
+            .all(|line| {
+                let fields: Vec<_> = line.split(' ').collect();
+                fields[4] != "15" && fields[5].parse::<u32>().unwrap() & (1 << 15) == 0
+            }));
     }
     #[test]
     fn explicit_opt_in_keeps_menus_and_legacy_records() {

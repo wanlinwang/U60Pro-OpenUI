@@ -33,9 +33,11 @@ static void refresh_page(void) {
   else if(page==GROUP)fetch_nodes();
 }
 static void go(int p) {
+  if(page==SMS_PAGE&&p!=SMS_PAGE)sms_leave();
   if(p!=UPLINK){relay_editor_clear();relay_view=RV_STATUS;}
   if(p!=IMEI_PAGE) {imei_clear();if(page==IMEI_PAGE){relay_wipe(html,sizeof(html));relay_wipe(drawn_html,sizeof(drawn_html));drawn_valid=0;}}
   page=p;notice[0]=0;need_draw=1;
+  if(p==SMS_PAGE){relay_wipe(&sms_ui,sizeof(sms_ui));sms_ui.view=SMS_LIST;relay_view=RV_STATUS;if(!blocked())send_job("sms refresh\n",JOB_SMS_LIST,0);}
   if(p==USB_PAGE){usb_draft=-1;ttl_draft=-1;}
   if(p==WIFI_PAGE){wifi_view=0;wifi_offset=0;}
   if(p==NODES)fetch_groups();
@@ -80,10 +82,12 @@ static void confirm_backend(int target) {
 }
 static int digit_id(const char *a, char c, char max) { return a[0]==c&&a[1]>='0'&&a[1]<=max&&!a[2]?a[1]-'0':-1; }
 #include "relay_actions.h"
+#include "sms_actions.h"
 /* The power menu: a long press opens it over any page or dialog, but never twice while
  * the device is already going down. */
 static void power_menu(void) {
   if(dialog==DLG_POWERING)return;
+  if(page==SMS_PAGE){sms_leave();sms_ui.load_error=1;}
   relay_editor_clear();relay_view=RV_STATUS;imei_clear();
   dialog=DLG_POWER;power_error[0]=0;need_draw=1;
 }
@@ -154,16 +158,17 @@ static void tap(int x,int y) {
   if(!strcmp(a,"none"))return;
   need_draw=1;
   if(dialog){dialog_tap(a);return;}
-  if(!strcmp(a,"stock")) { imei_clear();relay_editor_clear();quitting=1;return; }
+  if(!strcmp(a,"stock")) { if(page==SMS_PAGE)sms_leave();imei_clear();relay_editor_clear();quitting=1;return; }
   if(imei_tap(a))return;
   if(!strcmp(a,"imei")&&page==SIGNAL_PAGE){go(IMEI_PAGE);return;}
+  if(sms_tap(a))return;
   if(relay_tap(a))return;
   /* The Wi-Fi page's device lists step back to the list above them, not the menu. */
   if(page==WIFI_PAGE&&wifi_view&&!strcmp(a,"back")) { wifi_view=wifi_view==2?1:0;wifi_offset=0;return; }
   if(!strcmp(a,"back")) { back();return; }
   static const struct { const char *id; int page; } links[]={
     {"wireguard",WG},{"overview",OVERVIEW},{"profiles",PROFILES},{"proxy",PROXY},
-    {"clash",CLASH},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"cfopt",CFOPT},{"esim",ESIM},
+    {"clash",CLASH},{"sms",SMS_PAGE},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"cfopt",CFOPT},{"esim",ESIM},
     {"wifi",WIFI_PAGE},{"signal",SIGNAL_PAGE},{"usb",USB_PAGE},{"power",POWER_PAGE},{"booster",BOOSTER_PAGE}};
   for(size_t i=0;i<sizeof(links)/sizeof(links[0]);i++)
     if(!strcmp(a,links[i].id)) { if(reachable(links[i].page)){group_offset=0;go(links[i].page);} return; }

@@ -2,7 +2,7 @@
 //! the panel may send, the records it reads, and the Clash proxies view it pages through.
 //! Groups and nodes travel to the panel by name but come back only as indices tied to a
 //! generation number, so a name with spaces or emoji never has to be parsed from the
-//! panel. No URLs, keys, endpoints or credentials appear in any record.
+//! panel. SMS records carry private content only on demand over the root-only socket.
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -15,6 +15,25 @@ pub const PAGE: usize = 4;
 #[derive(Debug, PartialEq)]
 pub enum Request {
     Status,
+    SmsClear,
+    SmsChat2 {
+        key: super::screen_sms::ThreadKey,
+        offset: usize,
+    },
+    SmsChat {
+        key: super::screen_sms::ThreadKey,
+        offset: usize,
+    },
+    SmsThread {
+        key: super::screen_sms::ThreadKey,
+        offset: usize,
+    },
+    SmsConversations {
+        offset: usize,
+    },
+    SmsPage {
+        offset: usize,
+    },
     /// A page of proxy groups from the cached view.
     Groups {
         offset: usize,
@@ -43,6 +62,8 @@ pub enum Power {
 pub enum Job {
     /// `toggle`, `profile` and `devices`: a WireGuard update. `toggle` never takes over
     /// from Clash; panels that know `backend` switch through it instead.
+    SmsRefresh,
+    SmsSend(super::screen_sms::Draft),
     Wireguard(Value),
     /// `backend <revision> wireguard|clash`, or `backend <revision> off <wireguard|clash>`
     /// naming the backend the panel shows as on (refused if another one is; older panels
@@ -459,6 +480,86 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
             return Err("Invalid relay request");
         }
         return relay(&payload.split(' ').collect::<Vec<_>>()).map(|a| Request::Job(Job::Relay(a)));
+    }
+    if line.trim_start().starts_with("sms ") {
+        let raw = line.strip_suffix('\n').unwrap_or(line);
+        if raw.len() > 400 || !raw.is_ascii() || raw.bytes().any(|b| b.is_ascii_control()) {
+            return Err("Invalid SMS request");
+        }
+        let words: Vec<_> = raw.split(' ').collect();
+        return match words.as_slice() {
+            ["sms", "clear"] => Ok(Request::SmsClear),
+            ["sms", "refresh"] => Ok(Request::Job(Job::SmsRefresh)),
+            ["sms", "conversations", offset] => Ok(Request::SmsConversations {
+                offset: index(offset)?,
+            }),
+            ["sms", "page", offset] => Ok(Request::SmsPage {
+                offset: index(offset)?,
+            }),
+            ["sms", kind @ ("thread" | "chat" | "chat2"), key, offset] => {
+                if key.is_empty()
+                    || key.len() > 196
+                    || key.len() % 2 != 0
+                    || !key.bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    return Err("Invalid SMS thread");
+                }
+                let bytes: Vec<u8> = key
+                    .as_bytes()
+                    .chunks_exact(2)
+                    .map(|c| u8::from_str_radix(std::str::from_utf8(c).unwrap_or(""), 16))
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| "Invalid SMS thread")?;
+                let key = String::from_utf8(bytes).map_err(|_| "Invalid SMS thread")?;
+                if key.chars().any(char::is_control)
+                    || !(key.starts_with("n:") || key.starts_with("a:") || key.starts_with("u:"))
+                {
+                    return Err("Invalid SMS thread");
+                }
+                let key = super::screen_sms::ThreadKey(key);
+                let offset = index(offset)?;
+                if *kind == "chat2" {
+                    Ok(Request::SmsChat2 { key, offset })
+                } else if *kind == "chat" {
+                    Ok(Request::SmsChat { key, offset })
+                } else {
+                    Ok(Request::SmsThread { key, offset })
+                }
+            }
+            ["sms", "send", number, message] => {
+                let decode = |s: &str, max: usize| -> Result<String, &'static str> {
+                    if s.is_empty()
+                        || s.len() > max * 2
+                        || s.len() % 2 != 0
+                        || !s.bytes().all(|b| b.is_ascii_hexdigit())
+                    {
+                        return Err("Invalid SMS input");
+                    }
+                    let bytes: Vec<u8> = s
+                        .as_bytes()
+                        .chunks_exact(2)
+                        .map(|c| u8::from_str_radix(std::str::from_utf8(c).unwrap_or(""), 16))
+                        .collect::<Result<_, _>>()
+                        .map_err(|_| "Invalid SMS input")?;
+                    if bytes.iter().any(|b| !(32..=126).contains(b)) {
+                        return Err("Invalid SMS input");
+                    }
+                    String::from_utf8(bytes).map_err(|_| "Invalid SMS input")
+                };
+                let number = decode(number, 32)?;
+                if !number
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || matches!(b, b'+' | b'*' | b'#'))
+                {
+                    return Err("Invalid SMS recipient");
+                }
+                Ok(Request::Job(Job::SmsSend(super::screen_sms::Draft {
+                    number,
+                    message: decode(message, 160)?,
+                })))
+            }
+            _ => Err("Invalid SMS request"),
+        };
     }
     let words: Vec<&str> = line.split_whitespace().collect();
     let job = |j: Job| Ok(Request::Job(j));
@@ -1335,6 +1436,38 @@ pub fn delay_body(cache: &Cache, generation: u64, index: usize) -> Result<Value,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sms_requests_are_bounded_and_redacted() {
+        use super::*;
+        assert_eq!(parse("sms clear\n"), Ok(Request::SmsClear));
+        let chat2 = parse("sms chat2 6e3a2b313233 2").unwrap();
+        assert!(!format!("{chat2:?}").contains("123"));
+        assert!(parse("sms chat2 6e3a00 0").is_err());
+        let chat = parse("sms chat 6e3a2b313233 2").unwrap();
+        assert!(!format!("{chat:?}").contains("123"));
+        assert!(parse("sms chat 6e3a00 0").is_err());
+        let thread = parse("sms thread 6e3a2b313233 2").unwrap();
+        assert!(!format!("{thread:?}").contains("123"));
+        assert!(parse("sms thread 6e3a2b313233 -1").is_err());
+        assert!(parse("sms thread 6e3a00 0").is_err());
+        assert_eq!(parse("sms page 4"), Ok(Request::SmsPage { offset: 4 }));
+        let send = parse("sms send 2b313233 48692021\n").unwrap();
+        assert!(format!("{send:?}").contains("redacted"));
+        assert!(!format!("{send:?}").contains("123"));
+        for invalid in [
+            "sms send 616263 41",
+            "sms send 3132 00",
+            "sms send 3132 ff",
+            "sms send 3132 4",
+            "sms send 3132 4141\nextra",
+            "sms page -1",
+            "sms clear extra",
+        ] {
+            assert!(parse(invalid).is_err(), "{invalid}");
+        }
+        assert!(parse(&format!("sms send 31 {}", "41".repeat(161))).is_err());
+    }
+
     use super::*;
     fn job(line: &str) -> Job {
         match parse(line) {

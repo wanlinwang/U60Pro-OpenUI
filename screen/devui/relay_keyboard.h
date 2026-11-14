@@ -4,8 +4,11 @@ static void relay_keybox(int x,int y,int w,const char *id,const char *label) {
   add("<a id=\"%s\" href=\"act:%s\" class=\"box btn\" style=\"left:%dpx;top:%dpx;width:%dpx;height:44px;line-height:42px\">",id,id,x,y,w);
   shortened(label,w-4,16);add("</a>");
 }
+static int sms_keyboard_inline(void) {
+  return page==SMS_PAGE&&sms_ui.view==SMS_THREAD&&relay_view==RV_KEYBOARD;
+}
 static void render_relay_keyboard(void) {
-  header(relay_edit.key==RK_SSID?L("SSID (ASCII)","SSID (ASCII)"):L("Wi-Fi password","Wi-Fi 密码"));
+  header(relay_edit.key==RK_SMS_TO?L("Recipient","收件号码"):relay_edit.key==RK_SMS_BODY?L("Message (ASCII)","短信正文（英文）"):relay_edit.key==RK_SSID?L("SSID (ASCII)","SSID (ASCII)"):L("Wi-Fi password","Wi-Fi 密码"));
   /* The HTML scaffold contains no input, even when Show is selected. Input and
    * count are painted into this reserved 296x64 rectangle without replacing g_doc. */
   relay_keybox(8,136,94,"rclear",L("Clear","清空"));
@@ -57,18 +60,21 @@ static void relay_keyboard_display(char value[35],char count[64]) {
   if(relay_edit.key==RK_PASSWORD&&!relay_edit.show)memset(value,'*',visible);
   else memcpy(value,s+n-visible,visible);
   value[visible]=0;
-  while(*value&&relay_keyboard_text_extent(value,NULL)>296)memmove(value,value+1,strlen(value));
+  int width=sms_keyboard_inline()?168:296;
+  while(*value&&relay_keyboard_text_extent(value,NULL)>width)memmove(value,value+1,strlen(value));
   snprintf(count,64,L("%zu / %zu bytes%s","%zu / %zu 字节%s"),n,relay_input_limit(),relay_edit.overflow?L(" · FULL"," · 已满"):"");
 }
 static void relay_keyboard_paint(uint16_t *target) {
   char value[35]={0},count[64]={0};relay_keyboard_display(value,count);
   html_view_target_begin(target,0);
-  /* Clear the whole old value/count, including a shown password's abandoned tail. */
-  html_view_fill_rect(12,72,296,64,11,13,17,255);
+  /* Clear the complete painted input, including abandoned bytes after backspace. */
+  int inline_sms=sms_keyboard_inline(),x=12,y=inline_sms?214:72,width=inline_sms?168:296;
+  html_view_fill_rect(x,y,width,inline_sms?44:64,11,13,17,255);
   int left=0;relay_keyboard_text_extent(value,&left);
-  html_view_draw_text_px(12-left,72,value,16,1,232,234,238,255);
-  if(relay_edit.overflow)html_view_draw_text_px(12,106,count,16,0,240,106,106,255);
-  else html_view_draw_text_px(12,106,count,16,0,154,161,172,255);
+  html_view_draw_text_px(x-left,y,value,16,1,232,234,238,255);
+  int count_y=inline_sms?y+22:106;
+  if(relay_edit.overflow)html_view_draw_text_px(x,count_y,count,16,0,240,106,106,255);
+  else html_view_draw_text_px(x,count_y,count,16,0,154,161,172,255);
   html_view_target_end();
   relay_wipe(value,sizeof(value));relay_wipe(count,sizeof(count));
 }

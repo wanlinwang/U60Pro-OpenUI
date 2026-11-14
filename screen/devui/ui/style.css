@@ -20,6 +20,8 @@ a { text-decoration:none; color:#e8eaee; }
 .right { text-align:right; }
 .center { text-align:center; }
 .row { display:block; background:#1a1f28; border:1px solid #2a313d; border-radius:12px; }
+.sms-in { background:#26303b; border:1px solid #3a4756; border-radius:12px; }
+.sms-out { background:#185d42; border:1px solid #2d8c68; border-radius:12px; }
 .row.current { background:#0f2a1c; border-color:#2f8a55; }
 .row.off { background:#13161c; border-color:#1d2129; color:#4f5662; }
 .tile { display:block; background:#1a1f28; border:1px solid #2a313d; border-radius:14px; }

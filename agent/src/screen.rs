@@ -4,6 +4,8 @@ use crate::{clash, clash_diag, handlers::AppState, network_ext, proxy, system, w
 // declared here so that main.rs needs no change.
 #[path = "screen_ipc.rs"]
 mod ipc;
+#[path = "screen_sms.rs"]
+mod screen_sms;
 use ipc::{Cache, Esim, Job, Power, Request, Tool};
 use serde_json::{json, Value};
 use std::{
@@ -257,6 +259,7 @@ pub fn open() -> (u16, Value) {
     }
 }
 pub fn close() -> (u16, Value) {
+    screen_sms::clear();
     let _guard = LIFECYCLE.lock().unwrap();
     if let Some(pid) = owner().or_else(|| {
         let pid = SUPERVISOR.load(Ordering::Acquire);
@@ -742,10 +745,17 @@ enum Work {
     Admin(crate::admin_services::Update),
     Tool(Tool),
     CfOpt(ipc::CfOpt),
+    SmsRefresh,
+    SmsSend { number: String, message: String },
 }
 fn work(job: Job) -> Result<Work, &'static str> {
     let proxies = || PROXIES.lock().unwrap();
     Ok(match job {
+        Job::SmsRefresh => Work::SmsRefresh,
+        Job::SmsSend(draft) => Work::SmsSend {
+            number: draft.number,
+            message: draft.message,
+        },
         Job::Wireguard(v) => Work::Wireguard(v),
         Job::Backend(v) => Work::Backend(v),
         Job::Clash(v) => Work::Clash(v),
@@ -864,6 +874,25 @@ fn run_tool(t: &Tool) -> (u16, Value) {
 fn run(work: &Work) -> (u16, Value) {
     let body = |v: &Value| serde_json::to_vec(v).unwrap_or_default();
     match work {
+        Work::SmsRefresh => APP_STATE.get().map_or(
+            (503, json!({"ok":false,"error":"SMS unavailable"})),
+            |state| screen_sms::refresh(state),
+        ),
+        Work::SmsSend { number, message } => {
+            let Some(state) = APP_STATE.get() else {
+                return (503, json!({"ok":false,"error":"SMS unavailable"}));
+            };
+            let (code, _) =
+                crate::sms::sms_send(state, &body(&json!({"number":number,"message":message})));
+            if code == 200 {
+                (200, json!({"ok":true}))
+            } else {
+                (
+                    code,
+                    json!({"ok":false,"error":"SMS send failed or outcome unknown"}),
+                )
+            }
+        }
         Work::Wireguard(v) => wireguard::update(&body(v)),
         // The switch turns the other backend off in the same transaction.
         Work::Backend(v) => {
@@ -1075,6 +1104,15 @@ fn request(line: &str) -> String {
     INTEREST.store(mono(), Ordering::Relaxed);
     match ipc::parse(line) {
         Ok(Request::Status) => status(),
+        Ok(Request::SmsPage { offset }) => screen_sms::legacy_page(offset),
+        Ok(Request::SmsConversations { offset }) => screen_sms::page(offset),
+        Ok(Request::SmsThread { key, offset }) => screen_sms::thread(&key.0, offset),
+        Ok(Request::SmsChat { key, offset }) => screen_sms::chat(&key.0, offset),
+        Ok(Request::SmsChat2 { key, offset }) => screen_sms::chat2(&key.0, offset),
+        Ok(Request::SmsClear) => {
+            screen_sms::clear();
+            "OK\n".into()
+        }
         Ok(Request::Groups { offset }) => {
             PROXY_INTEREST.store(mono(), Ordering::Relaxed);
             ipc::groups_page(&PROXIES.lock().unwrap().cache, offset)

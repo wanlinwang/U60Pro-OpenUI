@@ -3,6 +3,7 @@
  */
 #define _GNU_SOURCE
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -100,11 +101,12 @@ static int screen_awake = 1;
 #endif
 /* Menu features first (their numbers are the settings record's page bits), then pages
  * reached from them. */
-enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_PAGE, SIGNAL_PAGE, USB_PAGE, POWER_PAGE, BOOSTER_PAGE, TAILSCALE, NODES, GROUP, SUBS, CORE, DIAG, CFOPT, IMEI_PAGE };
+enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_PAGE, SIGNAL_PAGE, USB_PAGE, POWER_PAGE, BOOSTER_PAGE, TAILSCALE, SMS_PAGE, NODES, GROUP, SUBS, CORE, DIAG, CFOPT, IMEI_PAGE };
 #define LEGACY_PAGES 27  /* features of a C record: WireGuard, devices, profiles, overview */
 #define MENU_PAGES 123   /* features of a V record: the above plus proxy and Clash */
 #define ESIM_MENU_PAGES 251 /* features of a W record: the above plus eSIM */
 #define UPLINK_MENU_PAGES 507 /* features of a Y record: the above plus the Wi-Fi uplink */
+#define SMS_MENU_PAGES 65531
 #define TAILSCALE_MENU_PAGES 32763
 #define TOOLBOX_MENU_PAGES 16379 /* features of a Z record: the above plus Pocket OS toolbox pages */
 static int page = MENU, offset, dialog, dirty, quitting, need_draw = 1,
@@ -120,7 +122,7 @@ static int settings_order[9], settings_order_count;
  * the stock UI (also with older agents, whose W records end at the language). */
 static int settings_sleep = 0;
 #define L(en, zh) (settings_zh ? (zh) : (en))
-static int visible_page(int p) { return p == MENU || (p <= TAILSCALE && (settings_menu & (1 << p))); }
+static int visible_page(int p) { return p == MENU || (p <= SMS_PAGE && (settings_menu & (1 << p))); }
 /* Saved profiles and device routing belong to WireGuard; node, subscription and core
  * pages to Clash; diagnostics to Clash and Proxy; the Wi-Fi uplink also to Overview,
  * which shows it when the agent reports one. */
@@ -150,8 +152,14 @@ static unsigned long long pending, pending_revision, chosen_profile, chosen_revi
 static char chosen_name[193];
 static char notice[128], failure_text[97];
 /* What the pending job does, for its labels and its completion. */
-enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM, JOB_UPLINK, JOB_TOOL, JOB_TS, JOB_ADMIN, JOB_CFOPT };
+enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM, JOB_UPLINK, JOB_TOOL, JOB_TS, JOB_ADMIN, JOB_CFOPT, JOB_SMS_LIST, JOB_SMS_SEND };
 static int pending_kind;
+enum { SMS_LIST, SMS_THREAD, SMS_DETAIL, SMS_COMPOSE, SMS_CONFIRM };
+struct sms_row { int tag, part, parts; char key[99], number[97], date[65], content[2049]; };
+static struct { int view, total, offset, thread_offset, n, chosen, text_offset, load_error, from_thread; char thread_key[99], thread_number[97], number[33], message[161], before[161]; struct sms_row rows[5]; } sms_ui;
+static void sms_fetch(void);
+static int sms_reply_number(void);
+static void sms_leave(void);
 /* USB page: the mode picked but not applied yet (-1: none). */
 static int usb_draft = -1;
 /* USB page: the mode an applied switch moves to (-1: none), until the H record shows it or
@@ -274,7 +282,7 @@ static int parse_menu_order(const char *line, unsigned long long *revision, int 
     if (*cursor < '0' || *cursor > '9') return 0;
     char *end;
     long value = strtol(cursor, &end, 10);
-    if ((*end && *end != ' ') || value < 0 || value > TAILSCALE || value == MENU || (bits & (1 << value))) return 0;
+    if ((*end && *end != ' ') || value < 0 || value > SMS_PAGE || value == MENU || (bits & (1 << value))) return 0;
     pages[i] = (int)value; bits |= 1 << value; cursor = end;
   }
   while (*cursor == ' ') cursor++;
@@ -291,7 +299,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
   int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0, w_sleep = 0;
   int y_ok = 0, y_idle = 0, y_level = 0, y_home = 0, y_mask = 0, y_sleep = 0;
-  int f_ok = 0, z_ok = 0, z_idle = 0, z_level = 0, z_home = 0, z_mask = 0, z_sleep = 0;
+  int k_ok = 0, f_ok = 0, z_ok = 0, z_idle = 0, z_level = 0, z_home = 0, z_mask = 0, z_sleep = 0;
   unsigned long long v_rev = 0, w_rev = 0, y_rev = 0, z_rev = 0;
   char v_lang[4] = "zh", w_lang[4] = "zh", y_lang[4] = "zh", z_lang[4] = "zh";
   while (line) {
@@ -355,16 +363,16 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
       }
     }
     /* F adds Tailscale. Validate into locals; bad extensions cannot poison Z. */
-    else if (line[0] == 'Z' || line[0] == 'F') {
+    else if (line[0] == 'Z' || line[0] == 'F' || (line[0] == 'K' && line[1] == ' ')) {
       char lang[4] = "";
       unsigned long long rev;int idle,level,home,mask,sleep;
       if (sscanf(line + 1, " %llu %d %d %d %d %3s %d", &rev, &idle, &level, &home, &mask, lang, &sleep) == 7 &&
           (sleep == 0 || sleep == 1) && (!strcmp(lang, "zh") || !strcmp(lang, "en")) &&
           idle >= 30 && idle <= 600 && level >= 20 && level <= 255 &&
-          home >= 0 && home <= (line[0] == 'F' ? TAILSCALE : BOOSTER_PAGE) && mask > 0 &&
-          !(mask & ~(line[0] == 'F' ? TAILSCALE_MENU_PAGES : TOOLBOX_MENU_PAGES)) &&
-          (home == MENU || (mask & (1 << home))) && (line[0] == 'F' || !f_ok)) {
-        z_ok = 1; f_ok |= line[0] == 'F';
+          home >= 0 && home <= (line[0] == 'K' ? SMS_PAGE : line[0] == 'F' ? TAILSCALE : BOOSTER_PAGE) && mask > 0 &&
+          !(mask & ~(line[0] == 'K' ? SMS_MENU_PAGES : line[0] == 'F' ? TAILSCALE_MENU_PAGES : TOOLBOX_MENU_PAGES)) &&
+          (home == MENU || (mask & (1 << home))) && (line[0] == 'K' || (!k_ok && (line[0] == 'F' || !f_ok)))) {
+        z_ok = 1; k_ok |= line[0] == 'K'; f_ok |= line[0] == 'F';
         z_rev=rev;z_idle=idle;z_level=level;z_home=home;z_mask=mask;z_sleep=sleep;
         snprintf(z_lang, sizeof(z_lang), "%s", lang);
       }
@@ -489,12 +497,12 @@ static int exchange(const char *request, char *reply, size_t cap) {
 #else
 /* Preview: the last request, all requests since the log was cleared, canned replies. */
 static char test_request[4096], test_log[8192];
-static const char *stub_groups, *stub_nodes, *stub_status, *stub_job = "OK 1\n";
+static const char *stub_groups, *stub_nodes, *stub_status, *stub_sms, *stub_sms_thread, *stub_job = "OK 1\n";
 static int exchange(const char *r, char *out, size_t cap) {
   snprintf(test_request, sizeof(test_request), "%s", r);
   size_t used = strlen(test_log);
   snprintf(test_log + used, sizeof(test_log) - used, "%s", r);
-  const char *reply = !strcmp(r,"status\n")?stub_status:!strncmp(r, "groups ", 7) ? stub_groups : !strncmp(r, "nodes ", 6) ? stub_nodes : stub_job;
+  const char *reply = !strcmp(r,"status\n")?stub_status:!strncmp(r, "sms conversations ", 18) ? stub_sms : !strncmp(r, "sms chat2 ", 10) ? stub_sms_thread : !strncmp(r, "groups ", 7) ? stub_groups : !strncmp(r, "nodes ", 6) ? stub_nodes : stub_job;
   if (!reply) return -1;
   snprintf(out, cap, "%s", reply);
   return 0;
@@ -590,6 +598,8 @@ static const char *job_failure(int kind, int result) {
   case JOB_CFOPT: return L("Optimization was refused; see OpenUI.", "优选请求被拒绝，请在 OpenUI 查看。");
   case JOB_ESIM: return L("The eSIM request was refused.", "eSIM 请求被拒绝。");
   case JOB_UPLINK: return L("Wi-Fi relay request failed. Check its status.", "无线中继请求失败，请检查状态。");
+  case JOB_SMS_LIST: return L("Cannot load SMS. Check the service.", "无法读取短信，请检查短信服务。");
+  case JOB_SMS_SEND: return L("Send failed or outcome unknown. Check Sent before retrying.", "发送失败或结果未知；重试前请检查已发送短信。");
   case JOB_ADMIN: return L("Service change failed. Reload status; do not retry blindly.", "服务更改失败。请刷新状态，勿盲目重试。");
   default: return L("Apply failed. Check OpenUI.", "应用失败，请在 OpenUI 中检查。");
   }
@@ -601,9 +611,11 @@ static void settle_jobs(void) {
     return;
   /* The agent numbers jobs from 1 after a restart: the pending job's outcome is lost. */
   if (data.job < pending) {
+    int kind = pending_kind;
     pending = 0;
     pending_kind = 0;
-    snprintf(notice, sizeof(notice), "%s", L("The agent restarted. Check the result.", "Agent 已重启，请检查结果。"));
+    snprintf(notice, sizeof(notice), "%s", kind==JOB_SMS_SEND ? L("Send outcome unknown. Check Sent before retrying.", "发送结果未知，重试前请检查已发送短信。") : L("The agent restarted. Check the result.", "Agent 已重启，请检查结果。"));
+    if(kind==JOB_SMS_SEND)dialog=3;
     return;
   }
   int kind = pending_kind;
@@ -611,6 +623,7 @@ static void settle_jobs(void) {
   if (finished && data.result) {
     snprintf(failure_text, sizeof(failure_text), "%s", kind!=JOB_UPLINK&&kind!=JOB_ADMIN&&data.failed_job == pending ? data.failure : "");
     if(kind==JOB_UPLINK){relay_editor_clear();relay_view=RV_STATUS;}
+    if(kind==JOB_SMS_LIST)sms_ui.load_error=1;
     snprintf(notice, sizeof(notice), "%s", job_failure(kind, data.result));
     usb_target = -1;
     pending = 0;
@@ -622,7 +635,7 @@ static void settle_jobs(void) {
     /* An outcome that never comes must not block the panel. */
     if (monotonic_ms() >= pending_deadline) {
       failure_text[0] = 0;
-      snprintf(notice, sizeof(notice), "%s", L("No result from the agent in time. Check the result.", "Agent 未及时返回结果，请检查。"));
+      snprintf(notice, sizeof(notice), "%s", kind==JOB_SMS_SEND ? L("Send outcome unknown. Check Sent before retrying.", "发送结果未知，重试前请检查已发送短信。") : L("No result from the agent in time. Check the result.", "Agent 未及时返回结果，请检查。"));
       pending = 0;
       pending_kind = 0;
       return_after_save = 0;
@@ -644,19 +657,27 @@ static void settle_jobs(void) {
     }
     return_after_save = 0;
   }
+  if (kind == JOB_SMS_LIST) sms_fetch();
+  if (kind == JOB_SMS_SEND && page==SMS_PAGE) {
+    relay_wipe(sms_ui.number,sizeof(sms_ui.number)); relay_wipe(sms_ui.message,sizeof(sms_ui.message));
+    sms_ui.view=sms_ui.from_thread?SMS_THREAD:SMS_LIST;sms_ui.thread_offset=0;sms_ui.from_thread=0;
+    if(!blocked())send_job("sms refresh\n",JOB_SMS_LIST,0);
+    snprintf(notice,sizeof(notice),"%s",L("Sent. Updating messages…","已发送，正在刷新短信…"));
+  }
   if (kind == JOB_SELECT || kind == JOB_DELAY)
     refresh_page();
 }
 /* After each status: settings, the device draft, pages that are no longer shown, jobs. */
 static void track_status(int changed) {
   int imei_was_open=page==IMEI_PAGE;
-  if(relay_edit.active&&(page!=UPLINK||!data.relay.has||stale()||relay_edit.rev!=data.uplink.rev||
+  if(relay_edit.active&&page!=SMS_PAGE&&(page!=UPLINK||!data.relay.has||stale()||relay_edit.rev!=data.uplink.rev||
       (relay_edit.from_scan&&(!relay_scan_fresh()||relay_edit.gen!=data.relay.gen))))relay_invalidate();
   int relay_total=relay_view==RV_SCAN?data.relay.nw:data.relay.ns;
   if(relay_offset>=relay_total)relay_offset=relay_total?(relay_total-1)/4*4:0;
   if (changed == 2) {
     page = settings_home;
     if (page == DEVICES) enter_devices();
+    else if (page == SMS_PAGE) go(SMS_PAGE);
     else refresh_page();
   }
   if (page == DEVICES && !dirty && !pending && !dialog) {
@@ -669,7 +690,7 @@ static void track_status(int changed) {
   if (diag_offset > last_checks) diag_offset = last_checks;
   /* Likewise eSIM profiles, after one was deleted or downloaded on the webpage. */
   if (esim_offset >= data.esim.n) esim_offset = data.esim.n > 0 ? (data.esim.n - 1) / 4 * 4 : 0;
-  if (!reachable(page) && !dirty && !pending && !dialog) page = MENU;
+  if (!reachable(page) && !dirty && !pending && !dialog) { if(page==SMS_PAGE)sms_leave(); page = MENU; }
   settle_jobs();
   imei_track();
   if(imei_was_open&&page!=IMEI_PAGE){relay_wipe(html,sizeof(html));relay_wipe(drawn_html,sizeof(drawn_html));drawn_valid=0;}
@@ -1341,6 +1362,7 @@ static int panel(int heartbeat, int idle_seconds) {
   }
   result = power_check && check_step != 3 ? 1 : 0;
 end:
+  if(page==SMS_PAGE)sms_leave();
   close(keyfd);
   drm_destroy(&drm);
   close(input.fd);
@@ -2179,6 +2201,7 @@ static void uplink_tests(struct drm_buf *b,const char *dir) {
 #include "devui/relay_tests.h"
 #include "devui/admin_tests.h"
 #include "devui/imei_tests.h"
+#include "devui/sms_tests.h"
 #include "devui/usblan_tests.h"
 #include "devui/wifi_tests.h"
 static void toolbox_tests(struct drm_buf *b, const char *dir) {
@@ -2473,6 +2496,7 @@ int main(int argc, char **argv) {
   usblan_tests(&b,argv[1]);
   wifi_tests(&b,argv[1]);
   imei_tests(&b,argv[1]);
+  sms_tests(&b,argv[1]);
   free(b.map);
   return 0;
 }

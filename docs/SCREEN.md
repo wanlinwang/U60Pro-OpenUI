@@ -129,6 +129,12 @@ checks reject stale saves from another browser session; **Reload settings**
 reloads the device's saved version. Settings contain no passwords, VPN keys, HTML,
 scripts or shell commands.
 
+## SMS on the device screen
+
+Enable **SMS** in **DevUI → Menu features**, arrange it as desired and save the settings. The screen groups up to 500 recent messages into conversations by sender or recipient. Open a conversation to read received messages in left-aligned bubbles and sent messages in right-aligned bubbles; tap the input at the bottom to type a reply with the keyboard on the same screen, then tap Send to review it. Hide the keyboard to see more messages. Use Earlier and Later to move through the conversation, including consecutive parts of long messages, and Refresh to load new messages. Received Chinese text is supported; unusually long message bodies are shortened with an ellipsis. Common formatting separators in phone numbers are ignored for grouping, but country codes are not guessed. Senders that are not valid phone numbers remain read-only. Tap **New SMS**, enter the recipient and message using the on-screen English, numeric and symbol keyboard, review both, then confirm sending. The current keyboard does not support entering Chinese. Sending uses the device SIM and may incur carrier charges. If a send result is unknown, check sent messages before retrying. This feature does not delete messages or mark them as read.
+
+SMS data is read on demand over the screen's root-only local socket and is not included in the ordinary status records. The screen clears its view when leaving the page. Viewing messages on the physical screen is accessible to anyone who can open DevUI; the stock lock screen does not protect it.
+
 ## Screen pages
 
 Rendered by the native preview build (`sh screen/build.sh --preview`), English:
@@ -291,7 +297,7 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   relay) with the idle action. Screens built before the idle action read six fields of
   `W` and return to the stock UI. `Z` has `Y`'s layout with the toolbox pages (9 Wi-Fi,
   10 5G signal, 11 USB & TTL, 12 battery & charge, 13 booster) and is sent only when one
-  of them is chosen; `Y` then leaves them out. `F` adds Tailscale. Each screen uses the
+  of them is chosen; `Y` then leaves them out. `F` adds Tailscale; space-delimited `K` adds SMS while tab-delimited `K` remains the Clash record. Each screen uses the
   newest record it accepts. An optional `N` record carries the settings revision and
   the ordered page numbers; a new screen accepts it only when the revision and full
   page mask match. Older screens ignore it and retain their original menu order.

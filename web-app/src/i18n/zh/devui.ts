@@ -11,6 +11,7 @@ export default {
   'Status, connect / disconnect and online exit selection; enrollment is separate': '状态、连接 / 断开与在线出口选择；请另行完成注册',
   'Clash': 'Clash',
   'eSIM': 'eSIM',
+  'Read and send text messages': '查看和发送短信',
   'Wi-Fi': 'Wi-Fi',
   '2.4 GHz & 5 GHz radio switches, SSID and connected client count': '2.4 GHz 与 5 GHz 频段开关、SSID 及在线终端数',
   'Live RSRP / SINR / band metrics and 5G SA / NSA / 4G mode switch': '实时 RSRP / SINR / 频段指标与 5G SA / NSA / 4G 制式切换',
