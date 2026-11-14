@@ -383,7 +383,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     else if (!strncmp(line,"I1",2)) {
       if(imei_seen++ || !parse_imei(line,&s.imei))imei_bad=1;
     }
-    else if (line[0] && strchr("ABKkUMXxEQqRHGTthLlwIi", line[0]) && line[1] == '\t') {
+    else if (line[0] && strchr("ABKkUMXxEQqRHGTthjLlwIi", line[0]) && line[1] == '\t') {
       char *f[48]; /* H has 41 fields */
       int n = split_tabs(line, f, 48);
       switch (f[0][0]) {
@@ -401,6 +401,7 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
       case 'T': parse_tailscale(f, n, &s.tailscale); break;
       case 't': parse_tailscale_row(f, n, &s.tailscale); break;
       case 'h': parse_tailscale_ssh(f, n, &s.tailscale); break;
+      case 'j': parse_tailscale_online(f, n, &s.tailscale); break;
       case 'R': parse_uplink(f, n, &s.uplink); break;
       case 'L': parse_relay(f,n,&s.relay);break;
       case 'l': parse_relay_saved(f,n,&s.relay);break;
@@ -2043,18 +2044,34 @@ static void tailscale_tests(struct drm_buf *b,const char *dir) {
       "S 7 1 0 0 0 0 0 0 1 %llu\n"
       "B\ttailscale\t0\t7\t1\t-\t0\t12\t1\t-\t0\t9\t1\t-\t0\n"
       "T\t9\t42\t1\tRunning\t0\tus-west-exit\t%llu\n"
-      "t\t0\t1\tus-west-exit\nt\t1\t0\thk-exit\nt\t2\t0\tjp-exit\nt\t3\t0\tsg-exit\nh\t0\t1\n"
+      "t\t0\t1\tus-west-exit\nt\t1\t0\thk-exit\nt\t2\t0\tjp-exit\nt\t3\t0\tsg-exit\nh\t0\t1\nj\t1\n"
       "C 200 120 128 2 27 en\nY 200 120 128 2 113 en 1\n"
       "F 200 120 128 14 16497 en 1\nJ 0 0 0 0 0\n.\n",now,now);
   struct snapshot s;assert(parse_snapshot(fixture,&s));
   assert(s.backend.active==BK_TS&&s.backend.rev[2]==9&&s.backend.ready[2]);
   assert(s.tailscale.has&&s.tailscale.n==4&&s.tailscale.gen==42&&!strcmp(s.tailscale.rows[1].name,"hk-exit"));
   assert(s.tailscale.has_ssh&&s.tailscale.remote_ssh==0&&s.tailscale.ssh_service==1);
+  assert(s.tailscale.has_online&&s.tailscale.online);
   /* An agent without remote SSH sends no h; a malformed h is ignored. */
   {struct snapshot o;char old[512];snprintf(old,sizeof(old),"S 7 1 0 0 0 0 0 0 1 %llu\nT\t9\t42\t1\tRunning\t0\t-\t%llu\nh\t3\t1\n.\n",now,now);
-   assert(parse_snapshot(old,&o)&&o.tailscale.has&&!o.tailscale.has_ssh);}
+   assert(parse_snapshot(old,&o)&&o.tailscale.has&&!o.tailscale.has_ssh&&!o.tailscale.has_online);
+   snprintf(old,sizeof(old),"S 7 1 0 0 0 0 0 0 1 %llu\nT\t9\t42\t1\tRunning\t0\t-\t%llu\nj\t2\n.\n",now,now);
+   assert(parse_snapshot(old,&o)&&o.tailscale.has&&!o.tailscale.has_online);}
   data=s;settings_revision=0;assert(update_settings(&s)==2&&settings_home==TAILSCALE);
-  reset_job();stub_job="OK 1\n";page=MENU;dialog=0;dirty=0;capture_both(b,dir,"menu-tailscale");
+  reset_job();stub_job="OK 1\n";page=MENU;dialog=0;dirty=0;
+  /* Show actual online status, not merely a running daemon or enabled preference. */
+  settings_zh=1;assert(!strcmp(ts_summary(),"已连接"));render(b);assert(strstr(html,"已连接"));
+  data.tailscale.online=0;assert(!strcmp(ts_summary(),"已断开"));render(b);assert(strstr(html,"已断开"));
+  data.tailscale.has_online=0;assert(!strcmp(ts_summary(),"连接状态未知"));
+  snprintf(data.tailscale.state,sizeof(data.tailscale.state),"Stopped");assert(!strcmp(ts_summary(),"已断开"));
+  snprintf(data.tailscale.state,sizeof(data.tailscale.state),"Starting");assert(!strcmp(ts_summary(),"启动中"));
+  snprintf(data.tailscale.state,sizeof(data.tailscale.state),"NeedsLogin");assert(!strcmp(ts_summary(),"请另行注册"));
+  snprintf(data.tailscale.state,sizeof(data.tailscale.state),"NeedsMachineAuth");assert(!strcmp(ts_summary(),"等待管理员批准"));
+  snprintf(data.tailscale.state,sizeof(data.tailscale.state),"Running");data.tailscale.has_online=1;data.tailscale.online=1;
+  data.tailscale.stamp=now-20;assert(!strcmp(ts_summary(),"状态已过期"));data.tailscale.stamp=now;
+  data.tailscale.error=1;assert(!strcmp(ts_summary(),"错误，请查看 OpenUI"));data.tailscale.error=0;
+  settings_zh=0;assert(!strcmp(ts_summary(),"Connected"));data.tailscale.online=0;assert(!strcmp(ts_summary(),"Disconnected"));data.tailscale.online=1;
+  capture_both(b,dir,"menu-tailscale");
   assert(strstr(html,"act:tailscale")&&strstr(html,"Tailscale"));
   press_id(b,"tailscale");assert(page==TAILSCALE);capture_both(b,dir,"tailscale");
   assert(strstr(html,"Status != forwarding")&&strstr(html,"us-west-exit"));
@@ -2302,7 +2319,14 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   press_id(b,"stock");assert(quitting);quitting=0;dialog=0;power_error[0]=0;data.stamp=(unsigned long long)time(NULL);page=MENU;reset_job();
   /* An unchanged page is not laid out or drawn again; a change on it, or a forced frame, is. */
   drawn_valid=0;page=MENU;assert(render_changed(b,0)&&!render_changed(b,0));
-  data.toolbox.kbps_down+=1000;assert(render_changed(b,0)&&!render_changed(b,0)&&render_changed(b,1));
+  /* With no overview tile, changing its rate does not affect menu HTML. */
+  assert(!visible_page(OVERVIEW));
+  data.toolbox.kbps_down+=1000;assert(!render_changed(b,0));
+  /* Showing the tile makes a changed rate visible and requests a redraw. */
+  settings_menu|=1<<OVERVIEW;
+  assert(render_changed(b,0)&&!render_changed(b,0));
+  data.toolbox.kbps_down+=1000;assert(render_changed(b,0)&&!render_changed(b,0));
+  data.toolbox.kbps_up+=1000;assert(render_changed(b,0)&&!render_changed(b,0)&&render_changed(b,1));
   puts("PASS toolbox grid, Wi-Fi, signal, USB & TTL, battery and booster pages (zh/en); power menu, confirmation, wait and refusals; unchanged pages are not redrawn");
 }
 /* --replay <status stream> <page>…: how often a recorded stream of agent status replies
@@ -2470,16 +2494,36 @@ int main(int argc, char **argv) {
   assert(strstr(html,"⚡充电中")&&!strstr(html,"12%⚡")&&!strstr(html,"background:#f06a6a;border-radius")&&!strstr(html,"background:#2f8a55;border-radius"));
   {char frame0[16384];snprintf(frame0,sizeof(frame0),"%s",html);
    charge_frame=2;render(&b);assert(strstr(html,"background:#2f8a55;border-radius")&&strcmp(frame0,html));}
-  page=MENU;charge_frame=3;capture(&b,argv[1],"menu-charging");assert(strstr(html,"12%⚡")&&strstr(html,"background:#2f8a55"));
-  assert(html_view_text_width_px("100%⚡",16)<=54);
-  data.battery=100;data.charging=2;capture(&b,argv[1],"menu-battery-full");assert(strstr(html,"100%⚡"));
+  page=MENU;charge_frame=3;capture(&b,argv[1],"menu-charging");assert(strstr(html,"12%")&&!strstr(html,"⚡"));
+  assert(html_view_text_width_px("100%",16)<=38);
+  /* Charging pulses at both ends of the range; unknown and noncharging remain static. */
+  for(int state=0;state<4;state++) {
+    data.battery=state==0?0:state==3?-1:100;data.charging=state==2?0:1;
+    charge_frame=0;render(&b);
+    const uint16_t before=((const uint16_t *)((const char *)b.map+21*b.pitch))[243];
+    charge_frame=2;render(&b);
+    const uint16_t after=((const uint16_t *)((const char *)b.map+21*b.pitch))[243];
+    if(state<2)assert(before!=after);else assert(before==after);
+    assert(!strstr(html,"⚡"));
+  }
+  data.battery=50;data.charging=1;drawn_valid=0;
+  uint16_t pulse_first=0,pulse_last=0;
+  for(int frame=0;frame<CHARGE_FRAMES;frame++) {
+    charge_frame=frame;assert(render_changed(&b,0));
+    uint16_t sample=((const uint16_t *)((const char *)b.map+21*b.pitch))[243];
+    if(frame)assert(sample!=pulse_last);else pulse_first=sample;
+    pulse_last=sample;
+  }
+  charge_frame=0;assert(render_changed(&b,0));
+  assert(((const uint16_t *)((const char *)b.map+21*b.pitch))[243]==pulse_first);
+  data.battery=100;data.charging=2;capture(&b,argv[1],"menu-battery-full");assert(strstr(html,"100%")&&!strstr(html,"⚡"));
   /* Full fill reaches the bottom inside edge; the battery tip and signal have
    * four background pixels between them in the rendered RGB565 frame. */
   {const uint16_t *row30=(const uint16_t *)((const char *)b.map+30*b.pitch);
    const uint16_t *row32=(const uint16_t *)((const char *)b.map+32*b.pitch);
    const uint16_t *row35=(const uint16_t *)((const char *)b.map+35*b.pitch);
    const uint16_t *row36=(const uint16_t *)((const char *)b.map+36*b.pitch);
-   assert(row35[230]==row32[230]&&row35[230]!=row36[230]);
+   assert(row35[246]==row32[246]&&row35[246]!=row36[246]);
    assert(row30[289]!=row30[290]&&row30[290]==row30[291]&&row30[290]==row30[292]&&row30[290]==row30[293]&&row30[293]!=row30[294]);}
   data.battery=0;data.charging=0;capture(&b,argv[1],"menu-battery-empty");assert(strstr(html,"0%")&&strstr(html,"#f06a6a"));
   data.battery=-1;capture(&b,argv[1],"menu-battery-unknown");assert(strstr(html,"--%")&&strstr(html,"#9aa1ac"));

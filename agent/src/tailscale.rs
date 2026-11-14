@@ -1252,7 +1252,8 @@ fn sanitized(s: &Settings, v: &Value, error: Option<String>) -> Value {
             .collect();
         json!({"id":id,"name":display_name(me, ""),
             "hostname":safe_name(me["HostName"].as_str().unwrap_or("")),
-            "ips":ips,"online":me["Online"].as_bool().unwrap_or(false)})
+            "ips":ips,"online":me["Online"].as_bool().unwrap_or(false),
+            "online_known":me["Online"].is_boolean()})
     });
     let state = sanitized_state(v);
     json!({"revision":s.revision,"enabled":s.enabled,"backend_state":state,"self":own,
@@ -1913,6 +1914,10 @@ mod tests {
         let own = sanitized(&Settings::default(), &json!({"Self":peer.clone()}), None);
         assert_eq!(own["self"]["name"], "us-west-exit");
         assert_eq!(own["self"]["hostname"], "instance-example");
+        assert_eq!(own["self"]["online"], true);
+        assert_eq!(own["self"]["online_known"], true);
+        let missing = sanitized(&Settings::default(), &json!({"Self":{"ID":"n1"}}), None);
+        assert_eq!(missing["self"]["online_known"], false);
         assert!(!own.to_string().contains("tailnet.ts.net"));
         assert!(!exit.to_string().contains("tailnet.ts.net"));
         peer.as_object_mut().unwrap().remove("DNSName");

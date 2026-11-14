@@ -246,6 +246,13 @@ pub fn tailscale_records(v: &Value, stamp: u64) -> String {
             ts_name(&p["name"])
         ));
     }
+    // j carries only the local node's online bit. Keep T's field count intact so
+    // older touchscreen builds continue to parse the rest of the status.
+    if v["self"]["online_known"] == true {
+        if let Some(online) = v["self"]["online"].as_bool() {
+            out.push_str(&format!("j\t{}\n", u8::from(online)));
+        }
+    }
     // h remote_ssh ssh_service: 0 off, 1 on, 2 unknown. A separate record, so screens
     // that require T's exact field count keep reading it. No addresses cross here.
     if v.get("remote_ssh").is_some() {
@@ -2378,6 +2385,23 @@ mod tailscale_tests {
         let mut many = v.clone();
         many["exit_nodes"] = json!(vec![json!({"id":"n1","name":"short"}); 40]);
         assert_eq!(tailscale_records(&many, 123).lines().count(), 33);
+    }
+    #[test]
+    fn online_projection_is_optional_and_does_not_leak_identity() {
+        let mut v = snapshot();
+        assert!(!tailscale_records(&v, 123).contains("\nj\t"));
+        v["self"]["online_known"] = json!(true);
+        v["self"]["online"] = json!(true);
+        let record = tailscale_records(&v, 123);
+        assert!(record.contains("\nj\t1\n"));
+        assert!(!record.contains("identity"));
+        v["self"]["online"] = json!(false);
+        assert!(tailscale_records(&v, 123).contains("\nj\t0\n"));
+        v["self"]["online_known"] = json!(false);
+        assert!(!tailscale_records(&v, 123).contains("\nj\t"));
+        v["self"]["online_known"] = json!(true);
+        v["self"]["online"] = Value::Null;
+        assert!(!tailscale_records(&v, 123).contains("\nj\t"));
     }
     #[test]
     fn cfopt_record_and_commands() {

@@ -7,6 +7,10 @@ static void usblan_fixture(const char *lan) {
   assert(parse_snapshot(text,&data));
   reset_job();page=OVERVIEW;
 }
+static int overview_contains(const char *start,const char *end,const char *text) {
+  const char *found=strstr(start,text);
+  return found&&found<end;
+}
 static void usblan_tests(struct drm_buf *b,const char *dir) {
   /* An older agent's 32-field H: still parsed, USB LAN unknown. */
   usblan_fixture("");assert(data.toolbox.has&&!data.toolbox.has_usb_lan);
@@ -35,16 +39,21 @@ static void usblan_tests(struct drm_buf *b,const char *dir) {
   usblan_fixture("\t1\t1\trndis0");data.stamp-=11;press_id(b,"ulan");assert(!test_request[0]);
   usblan_fixture("\t1\t1\trndis0");data.busy=1;press_id(b,"ulan");assert(!test_request[0]);
   usblan_fixture("\t1\t1\trndis0");
-  /* Main menu top bar: carrier name and bars, no figures (-88 dBm is three bars). */
+  /* The menu has no carrier card; signal bars remain (-88 dBm is three bars).
+   * Select only Overview so the Signal tile cannot itself display No SIM. */
+  int saved_menu=settings_menu,saved_order_count=settings_order_count,saved_zh=settings_zh,saved_order[9];
+  memcpy(saved_order,settings_order,sizeof(saved_order));settings_order_count=0;
+  settings_menu=1<<OVERVIEW;
   usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18\tT-Mobile");page=MENU;
   assert(!strcmp(data.toolbox.carrier,"T-Mobile"));
-  render(b);assert(strstr(html,"T-Mobile")&&!strstr(html,"dBm")&&!strstr(html,"5G SA"));
+  render(b);assert(!strstr(html,"T-Mobile")&&!strstr(html,"dBm")&&!strstr(html,"5G SA"));
+  assert(!strstr(html,"left:10px;top:64px;width:300px;height:84px"));
   assert(strstr(html,"left:304px;top:23px;width:3px;height:12px;background:#4cc97a")&&strstr(html,"left:309px;top:20px;width:3px;height:15px;background:#323a47"));
   capture_both(b,dir,"menu-carrier");
-  /* An older agent's H39, or no service name: the radio type stands in. */
+  /* An older H39 or missing carrier still parses without restoring the card. */
   usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18");page=MENU;render(b);
-  assert(!data.toolbox.carrier[0]&&strstr(html,"5G SA")&&!strstr(html,"dBm"));
-  usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18\t-");page=MENU;render(b);assert(!data.toolbox.carrier[0]&&strstr(html,"5G SA"));
+  assert(!data.toolbox.carrier[0]&&!strstr(html,"5G SA")&&!strstr(html,"dBm"));
+  usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18\t-");page=MENU;render(b);assert(!data.toolbox.carrier[0]&&!strstr(html,"5G SA"));
   assert(data.toolbox.sim==-1);
   /* No SIM: `-` figures and sim 0, so nothing shows the emergency-camping level. */
   {
@@ -55,11 +64,60 @@ static void usblan_tests(struct drm_buf *b,const char *dir) {
     assert(parse_snapshot(text,&data));reset_job();
   }
   assert(data.toolbox.sim==0&&data.toolbox.rsrp==NO_FIGURE&&data.toolbox.sinr==NO_FIGURE&&data.toolbox.rsrq==NO_FIGURE);
-  page=MENU;render(b);assert(strstr(html,"No SIM")&&!strstr(html,"dBm")&&!strstr(html,"LIMITED"));
+  page=MENU;render(b);assert(!strstr(html,"No SIM")&&!strstr(html,"dBm")&&!strstr(html,"LIMITED"));
   assert(strstr(html,"left:294px;top:29px;width:3px;height:6px;background:#323a47"));
   capture_both(b,dir,"menu-no-sim");
   page=SIGNAL_PAGE;render(b);assert(strstr(html,"No SIM")&&!strstr(html," dBm")&&!strstr(html,"LIMITED"));
   capture_both(b,dir,"signal-no-sim");
+
+  /* Live rates and CPU remain within Overview for both row and grid layouts. */
   usblan_fixture("\t1\t1\trndis0");
-  puts("PASS USB LAN H35 parsing (old H32 unknown), Overview 48px row above admin rows (zh/en), exact on/off commands, pending/stale/busy guards; menu carrier + bars (H40, H39 fallback), no-SIM H41 without figures");
+  data.toolbox.kbps_down=125;data.toolbox.kbps_up=2500;data.cpu=12.4;
+  settings_menu=1<<OVERVIEW;settings_order_count=0;page=MENU;
+  for(int lang=0;lang<=1;lang++) {
+    settings_zh=lang;render(b);
+    const char *a=strstr(html,"id=\"overview\""),*end=a?strstr(a,"</a>"):NULL;
+    assert(a&&end&&overview_contains(a,end,"CPU12%")&&overview_contains(a,end,"↓125K")&&overview_contains(a,end,"↑2.5M"));
+    int x,y,w,h;assert(html_view_rect("#overview",&x,&y,&w,&h));
+    assert(y>=52&&w>=48&&h>=48&&x+w<=W&&y+h<=H);
+    press_id(b,"overview");assert(page==OVERVIEW);page=MENU;
+  }
+  capture_both(b,dir,"menu-overview-rates-row");
+  settings_menu=(1<<OVERVIEW)|(1<<WG)|(1<<PROXY)|(1<<CLASH)|(1<<SIGNAL_PAGE);
+  settings_order_count=5;settings_order[0]=WG;settings_order[1]=PROXY;
+  settings_order[2]=SIGNAL_PAGE;settings_order[3]=OVERVIEW;settings_order[4]=CLASH;
+  for(int lang=0;lang<=1;lang++) {
+    settings_zh=lang;render(b);
+    const char *wg=strstr(html,"id=\"wireguard\""),*a=strstr(html,"id=\"overview\""),*end=a?strstr(a,"</a>"):NULL;
+    const char *clash=strstr(html,"id=\"clash\"");
+    assert(wg&&a&&end&&clash&&wg<a&&a<clash);
+    assert(overview_contains(a,end,"CPU12%")&&overview_contains(a,end,"↓125K")&&overview_contains(a,end,"↑2.5M"));
+    int x,y,w,h;assert(html_view_rect("#overview",&x,&y,&w,&h));
+    assert(y>=52&&w>=48&&h>=48&&x+w<=W&&y+h<=H);
+    press_id(b,"overview");assert(page==OVERVIEW);page=MENU;
+  }
+  capture_both(b,dir,"menu-overview-rates-grid");
+  /* Actual rendered text width must fit: shortening would hide the rate. */
+  {
+    const unsigned long long rates[]={0,125,999,1000,9999,10000,999999,1000000,9999999,
+      10000000,999999999,1000000000,9999999999ULL,~0ULL};
+    char compact[24],label[32];
+    for(size_t i=0;i<sizeof(rates)/sizeof(rates[0]);i++) {
+      menu_rate(compact,sizeof(compact),rates[i]);
+      for(int direction=0;direction<2;direction++) {
+        snprintf(label,sizeof(label),"%s%s",direction?"↑":"↓",compact);
+        int width=html_view_text_width_px(label,12);
+        if(width>39)fprintf(stderr,"overview rate too wide: %s (%d px)\n",label,width);
+        assert(width<=39);
+      }
+    }
+    assert(html_view_text_width_px("CPU100%",10)<=38);
+  }
+  data.toolbox.has=0;data.stamp=0;render(b);
+  {const char *a=strstr(html,"id=\"overview\""),*end=a?strstr(a,"</a>"):NULL;
+   assert(a&&end&&overview_contains(a,end,"CPU--")&&overview_contains(a,end,"↓--")&&overview_contains(a,end,"↑--"));}
+  capture_both(b,dir,"menu-overview-rates-unknown");
+  usblan_fixture("\t1\t1\trndis0");
+  settings_menu=saved_menu;settings_order_count=saved_order_count;settings_zh=saved_zh;memcpy(settings_order,saved_order,sizeof(saved_order));
+  puts("PASS USB LAN H35 parsing (old H32 unknown), Overview 48px row above admin rows (zh/en), exact on/off commands, pending/stale/busy guards; menu signal bars without carrier card, no-SIM H41 without figures");
 }

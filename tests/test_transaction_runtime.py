@@ -572,6 +572,20 @@ class RuntimeTransactions(unittest.TestCase):
         self.action('restore')
         self.assertEqual((self.root / 'mode').read_text(), '1')
 
+    def test_fota_status_only_success_requires_matching_readback(self):
+        self.action('begin')
+        self.action('quiesce', 'none')
+        self.write('mode', '0')
+        self.write('fota-reply', '')
+        self.write('fota-noapply', 'yes')
+        self.action('restore', success=False)
+        self.assert_pending()
+        self.assertEqual((self.root / 'mode').read_text(), '0')
+        (self.root / 'fota-noapply').unlink()
+        self.action('restore')
+        self.assertEqual((self.root / 'mode').read_text(), '1')
+        self.assertEqual((self.transaction / 'state').read_text().strip(), 'restored')
+
     def test_unsupported_fota_mode_fails_before_mutation(self):
         self.write('mode', '2')
         self.action('begin', success=False)

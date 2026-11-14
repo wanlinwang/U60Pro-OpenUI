@@ -88,10 +88,13 @@ restore_fota() {
     mode=$(cat "$transaction/runtime/fota")
     case "$mode" in 0|1) ;; *) return 65 ;; esac
     reply=$(runtime fota-call "$mode") || return 65
-    # Do not let the already-restored UCI file mask an RPC business error.
-    # Only an empty JSON object is accepted as the setter acknowledgement;
-    # error fields, malformed data and unknown reply schemas stay pending.
-    test "$(printf '%s' "$reply" | tr -d '\011\012\015\040')" = '{}' || { echo 'Unrecognized FOTA setter acknowledgement; recovery remains pending' >&2; return 65; }
+    # A successful ubus call may return no data (status-only ACK), or an empty
+    # JSON object. Any nonempty error/unknown reply remains a recovery failure.
+    # https://github.com/openwrt/ubus/blob/master/cli.c (ubus_cli_call)
+    case "$(printf '%s' "$reply" | tr -d '\011\012\015\040')" in
+        ''|'{}') ;;
+        *) echo 'Unrecognized FOTA setter acknowledgement; recovery remains pending' >&2; return 65 ;;
+    esac
     test "$(runtime fota-get)" = "$mode"
 }
 

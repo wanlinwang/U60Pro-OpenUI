@@ -103,11 +103,14 @@ static int ts_blocked(void) {
 static const char *ts_summary(void) {
   const struct tailscale_info *t=&data.tailscale;
   return !t->has?L("Unavailable","不可用"):ts_blocked()&&!pending&&!data.busy?L("Status stale","状态已过期"):
-    pending||data.busy?L("Applying","正在应用"):t->error?L("Error; see OpenUI","错误，请查看 OpenUI"):
+    pending||data.busy?L("Applying","正在应用"):
+    !strcmp(t->state,"Stopped")?L("Disconnected","已断开"):
+    t->error?L("Error; see OpenUI","错误，请查看 OpenUI"):
     !strcmp(t->state,"NeedsLogin")?L("Enroll separately","请另行注册"):
     !strcmp(t->state,"NeedsMachineAuth")?L("Approval needed","等待管理员批准"):
-    !t->enabled?L("Off","已关闭"):!strcmp(t->state,"Running")?L("Running (status only)","运行中（仅状态）"):
-    !strcmp(t->state,"Starting")?L("Starting","启动中"):L("Unavailable","不可用");
+    !strcmp(t->state,"Starting")?L("Starting","启动中"):
+    !strcmp(t->state,"Running")?(t->has_online?(t->online?L("Connected","已连接"):L("Disconnected","已断开")):L("Connection unknown","连接状态未知")):
+    L("Unavailable","不可用");
 }
 /* Remote SSH: tailnet port 22 forwarded to this router's local SSH. Unknown is a
  * label, never an OFF switch. */

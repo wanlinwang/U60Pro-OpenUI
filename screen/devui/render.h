@@ -157,18 +157,21 @@ static void battery_badge(int x, int y, int large) {
 /* A compact status battery with a legible percentage over a dark level fill. */
 static void header_battery(int x,int y) {
   int percent=data.battery<0?0:data.battery>100?100:data.battery;
-  int charging=data.battery>=0&&data.charging==1,plugged=data.battery>=0&&data.charging;
+  int charging=data.battery>=0&&data.charging==1;
   const char *outline=data.battery<0?"#9aa1ac":percent<=20&&!charging?"#f06a6a":"#4cc97a";
   const char *fill=percent<=20&&!charging?"#652b2b":"#194e31";
+  /* Pulsing both the background and level makes charging visible even at 0% or 100%.
+   * Dark colors preserve contrast with the white percentage at every frame. */
+  static const char *const pulse_bg[]={"#101d17","#132b20","#183929","#132b20"};
+  static const char *const pulse_fill[]={"#194e31","#245e3b","#31744b","#245e3b"};
+  if(charging){rect(x+2,y+2,42,16,"",pulse_bg[charge_frame%CHARGE_FRAMES]);fill=pulse_fill[charge_frame%CHARGE_FRAMES];}
+  rect(x+2,y+2,42*percent/100,16,"",fill);
   /* litehtml paints the 2px border outside the declared content dimensions. */
-  int climb=charging&&percent<100?58*(percent+(100-percent)*charge_frame/(CHARGE_FRAMES-1))/100:0;
-  if(climb>58*percent/100)rect(x+2,y+2,climb,16,"","#2f8a55");
-  rect(x+2,y+2,58*percent/100,16,"",fill);
-  add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:58px;height:16px;border:2px solid %s;border-radius:5px\"></div>",x,y,outline);
-  rect(x+63,y+6,3,8,"",outline);
+  add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:42px;height:16px;border:2px solid %s;border-radius:5px\"></div>",x,y,outline);
+  rect(x+47,y+6,3,8,"",outline);
   char label[24];if(data.battery<0)snprintf(label,sizeof(label),"--%%");
-  else snprintf(label,sizeof(label),plugged?"%d%%⚡":"%d%%",percent);
-  box(x+4,y,54,20,"head center",label);
+  else snprintf(label,sizeof(label),"%d%%",percent);
+  box(x+4,y,38,20,"head center",label);
 }
 /* Label, right-aligned value and an optional usage bar (percent < 0: no bar). */
 static void stat_row(int y, const char *label, const char *value, double percent) {
@@ -320,7 +323,9 @@ static void tile_state(int p, char *buf, size_t n, const char **cls) {
     snprintf(buf,n,"%s",!bk->has||bk->active==BK_OFF?L("Off","关闭"):bk->active==BK_WG?"WireGuard":bk->active==BK_TS?"Tailscale":"Clash"); return;
   case WG: *cls=summary_class(); snprintf(buf,n,"%s",summary()); return;
   case CLASH: *cls=data.clash.has?clash_class():"muted"; snprintf(buf,n,"%s",data.clash.has?clash_summary():"--"); return;
-  case TAILSCALE: snprintf(buf,n,"%s",ts_summary()); return;
+  case TAILSCALE:
+    if(!ts_blocked()&&!pending&&!data.busy&&!data.tailscale.error&&!strcmp(data.tailscale.state,"Running")&&data.tailscale.has_online&&data.tailscale.online)*cls="good";
+    snprintf(buf,n,"%s",ts_summary()); return;
   case SMS_PAGE: snprintf(buf,n,"%s",L("Messages","短信")); return;
   case ESIM:
     if(data.esim.has&&!strcmp(data.esim.card,"euicc"))snprintf(buf,n,"%s",esim_summary());
@@ -348,6 +353,43 @@ static void tile_state(int p, char *buf, size_t n, const char **cls) {
   case BOOSTER_PAGE: snprintf(buf,n,L("RAM %.0f%%","内存 %.0f%%"),data.memory>=0?data.memory:0.0); return;
   case PROFILES: snprintf(buf,n,"%s",active_profile()); return;
   default: snprintf(buf,n,"%d / %d",selected_count(),data.n); return;
+  }
+}
+/* Compact decimal kbit/s, at most four ASCII characters, for the menu tile. */
+static void menu_rate(char *out,size_t n,unsigned long long kbps) {
+  if(kbps>=10000000000ULL)snprintf(out,n,">9T");
+  else if(kbps>=1000000000ULL)snprintf(out,n,"%llu.%lluT",kbps/1000000000ULL,(kbps/100000000ULL)%10);
+  else if(kbps>=10000000ULL)snprintf(out,n,"%lluG",kbps/1000000ULL);
+  else if(kbps>=1000000ULL)snprintf(out,n,"%llu.%lluG",kbps/1000000ULL,(kbps/100000ULL)%10);
+  else if(kbps>=10000ULL)snprintf(out,n,"%lluM",kbps/1000ULL);
+  else if(kbps>=1000ULL)snprintf(out,n,"%llu.%lluM",kbps/1000ULL,(kbps/100ULL)%10);
+  else snprintf(out,n,"%lluK",kbps);
+}
+/* The menu's Overview entry carries live CPU and both network directions. */
+static void menu_overview(int x,int y,int tile) {
+  char cpu[32],down[24],up[24],down_label[32],up_label[32];
+  if(!data.stamp||data.cpu<0)snprintf(cpu,sizeof(cpu),"CPU--");
+  else snprintf(cpu,sizeof(cpu),"CPU%.0f%%",data.cpu);
+  if(data.toolbox.has){menu_rate(down,sizeof(down),data.toolbox.kbps_down);menu_rate(up,sizeof(up),data.toolbox.kbps_up);}
+  else {snprintf(down,sizeof(down),"--");snprintf(up,sizeof(up),"--");}
+  snprintf(down_label,sizeof(down_label),"↓%s",down);snprintf(up_label,sizeof(up_label),"↑%s",up);
+  if(tile) {
+    add("<a id=\"overview\" href=\"act:overview\" class=\"box\" style=\"left:%dpx;top:%dpx;width:96px;height:48px\">",x,y);
+    add("<div class=\"box tile\" style=\"left:3px;top:2px;width:90px;height:44px\">");
+    add("<div class=\"box head\" style=\"left:5px;top:1px;width:40px;height:20px;font-size:%dpx\">",settings_zh?16:10);
+    shortened(menu_title(OVERVIEW,1),40,settings_zh?16:10);add("</div>");
+    add("<div class=\"box head\" style=\"left:46px;top:1px;width:38px;height:20px;font-size:10px\">");
+    shortened(cpu,38,10);add("</div>");
+    add("<div class=\"box good\" style=\"left:4px;top:21px;width:39px;height:20px;font-size:12px\">");
+    shortened(down_label,39,12);add("</div>");
+    add("<div class=\"box accent\" style=\"left:46px;top:21px;width:39px;height:20px;font-size:12px\">");
+    shortened(up_label,39,12);add("</div></div></a>");
+  } else {
+    open_row(x,y,300,48,"overview",1,"");
+    add("<div class=\"name\" style=\"top:3px;right:100px\">");escaped(menu_title(OVERVIEW,0));add("</div>");
+    add("<div class=\"box muted right\" style=\"left:178px;top:3px;width:82px;height:20px;font-size:12px\">");shortened(cpu,82,12);add("</div>");
+    add("<div class=\"box good\" style=\"left:14px;top:25px;width:110px;height:20px\">");escaped(down_label);add("</div>");
+    add("<div class=\"box accent\" style=\"left:140px;top:25px;width:110px;height:20px\">");escaped(up_label);add("</div>");chevron(48);add("</a>");
   }
 }
 static uint16_t pixels[W * H];
@@ -392,43 +434,13 @@ static void build_html(void) {
     add("<a id=\"stock\" href=\"act:stock\" class=\"box\" style=\"left:80px;top:4px;width:96px;height:48px\">");
     add("<div class=\"box btn\" style=\"left:8px;top:10px;width:80px;height:28px;line-height:26px\">");
     shortened(L("Stock UI","原生主题"),72,16);add("</div></a>");
-    const struct backend_info *bk=&data.backend;
     const struct toolbox_info *tb=&data.toolbox;
     /* Power and signal remain visible in the upper right, including when data is stale. */
-    header_battery(224,18);
+    header_battery(240,18);
     long long signal_r=tb->has&&tb->sim!=0?tb->rsrp:NO_FIGURE;
     int lit=signal_r==NO_FIGURE?0:signal_r>=-85?4:signal_r>=-95?3:signal_r>=-105?2:signal_r>=-115?1:0;
     const char *signal_tone=tone_color(signal_r>-95?"good":signal_r>-110?"warn":"bad");
     for(int i=0;i<4;i++)rect(294+i*5,20+(3-i)*3,3,6+i*3,"",i<lit?signal_tone:"#323a47");
-    /* Keep the carrier / SIM or uptime above the proxy and current speed. */
-    add("<div class=\"box card\" style=\"left:10px;top:64px;width:300px;height:84px\"></div>");
-    if(tb->has&&(tb->sim==0||tb->rsrp!=NO_FIGURE)) {
-      if(tb->sim==0)sbox(24,76,272,20,"head warn",L("No SIM","无 SIM 卡"));
-      else sbox(24,76,272,20,"head",tb->carrier[0]?tb->carrier:tb->radio[0]?tb->radio:"5G");
-    } else if(data.uptime) {
-      if(data.uptime>=86400)snprintf(tmp,sizeof(tmp),L("Up %llud %lluh","已运行 %llu 天 %llu 时"),data.uptime/86400,data.uptime/3600%24);
-      else snprintf(tmp,sizeof(tmp),L("Up %lluh %llum","已运行 %llu 时 %llu 分"),data.uptime/3600,data.uptime/60%60);
-      sbox(24,76,272,20,"muted",tmp);
-    }
-    rect(22,105,276,1,"line",NULL);
-    /* The active proxy backend when the agent reports it, else WireGuard as before. */
-    const char *cls=bk->has?proxy_class():summary_class();
-    dot(24,121,tone_color(cls));
-    /* The backend's name first when the line has room for both. */
-    int room=tb->has?148:254;
-    if(bk->has&&bk->active==BK_OFF)snprintf(tmp,sizeof(tmp),"%s",proxy_summary());
-    else {
-      snprintf(tmp,sizeof(tmp),"%s · %s",bk->has&&bk->active==BK_CLASH?"Clash":bk->has&&bk->active==BK_TS?"Tailscale":"WireGuard",bk->has?proxy_summary():summary());
-      if(html_view_text_width_px(tmp,16)>room)snprintf(tmp,sizeof(tmp),"%s",bk->has&&bk->active==BK_TS?"Tailscale":bk->has?proxy_summary():summary());
-    }
-    snprintf(rx,sizeof(rx),"head %s",strcmp(cls,"muted")?cls:"");
-    if(tb->has) {
-      char d_rate[24],u_rate[24],rates[64];
-      format_rate(d_rate,sizeof(d_rate),tb->kbps_down);format_rate(u_rate,sizeof(u_rate),tb->kbps_up);
-      sbox(42,116,room,20,rx,tmp);
-      snprintf(rates,sizeof(rates),"↓%s ↑%s",d_rate,u_rate);
-      sbox(190,116,106,20,"muted right",rates);
-    } else sbox(42,116,room,20,rx,tmp);
     const int pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,SMS_PAGE,PROFILES,DEVICES};
     const char *ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","sms","profiles","devices"};
     int vis_idx[15], vis_cnt=0;
@@ -441,13 +453,15 @@ static void build_html(void) {
     if(vis_cnt<=4) {
       for(int r=0;r<vis_cnt;r++) {
         int i=vis_idx[r];
-        nav_row(10,160+50*r,300,48,ids[i],menu_title(pages[i],0),menu_detail(pages[i]),"",1);
+        if(pages[i]==OVERVIEW)menu_overview(10,68+50*r,0);
+        else nav_row(10,68+50*r,300,48,ids[i],menu_title(pages[i],0),menu_detail(pages[i]),"",1);
       }
     } else {
       /* Two lines keep the feature and state readable with 48px touch targets. */
       int show=vis_cnt>9?9:vis_cnt;
       for(int r=0;r<show;r++) {
-        int i=vis_idx[r],x=10+(r%3)*102,y=158+(r/3)*50;
+        int i=vis_idx[r],x=10+(r%3)*102,y=68+(r/3)*50;
+        if(pages[i]==OVERVIEW){menu_overview(x,y,1);continue;}
         const char *scls="muted";
         tile_state(pages[i],tmp,sizeof(tmp),&scls);
         add("<a id=\"%s\" href=\"act:%s\" class=\"box\" style=\"left:%dpx;top:%dpx;width:96px;height:48px\">",ids[i],ids[i],x,y);

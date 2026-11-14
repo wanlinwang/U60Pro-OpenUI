@@ -72,6 +72,7 @@ struct tailscale_row { int index, selected; char name[49]; };
 struct tailscale_info {
   int has, enabled, error, n;
   int has_ssh, remote_ssh, ssh_service; /* h: 0 off, 1 on, 2 unknown */
+  int has_online, online; /* j: local tailnet online state */
   unsigned long long rev, gen, stamp;
   char state[20], selected[49];
   struct tailscale_row rows[32];
@@ -544,6 +545,11 @@ static void parse_cfopt(char **f,int n,struct cfopt_info *c) {
   COPY(c->phase,f[4]);COPY(c->ip,f[5]);COPY(c->colo,f[6]);
   c->tls_ms=(unsigned)u64_field(f[7]);c->speed_kbps=(unsigned)u64_field(f[8]);
   c->last_run=u64_field(f[9]);c->interval=atoi(f[10]);COPY(c->problem,f[11]);
+}
+/* j: online bit is optional, so old agents remain explicitly unknown. */
+static void parse_tailscale_online(char **f,int n,struct tailscale_info *t) {
+  if(!t->has||n!=2||(strcmp(f[1],"0")&&strcmp(f[1],"1")))return;
+  t->has_online=1;t->online=atoi(f[1]);
 }
 /* h: whether tailnet port 22 forwards to local SSH, and whether that SSH runs. */
 static void parse_tailscale_ssh(char **f,int n,struct tailscale_info *t) {
