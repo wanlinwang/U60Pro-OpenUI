@@ -680,7 +680,9 @@ fn status() -> String {
     // The job result first: records read after it already show a finished job.
     let (done, result) = *RESULT.lock().unwrap();
     let failure = FAILURE.lock().unwrap().clone();
-    let mut tail = crate::screen_settings::current().projection();
+    let settings = crate::screen_settings::current();
+    let mut tail = settings.projection();
+    tail.push_str(&settings.menu_order_record());
     // Cached projection only; the dedicated native-service worker never blocks this socket.
     if let Some(s) = crate::admin_services::snapshot() {
         tail.push_str(&ipc::admin_record(&s));

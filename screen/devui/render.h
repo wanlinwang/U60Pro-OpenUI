@@ -388,7 +388,12 @@ static void build_html(void) {
     const int pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,PROFILES,DEVICES};
     const char *ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","profiles","devices"};
     int vis_idx[14], vis_cnt=0;
-    for(int i=0;i<14;i++) if(visible_page(pages[i])) vis_idx[vis_cnt++]=i;
+    if(settings_order_count) {
+      for(int r=0;r<settings_order_count;r++)
+        for(int i=0;i<14;i++) if(pages[i]==settings_order[r] && visible_page(pages[i])) vis_idx[vis_cnt++]=i;
+    } else {
+      for(int i=0;i<14;i++) if(visible_page(pages[i])) vis_idx[vis_cnt++]=i;
+    }
     if(vis_cnt<=4) {
       for(int r=0;r<vis_cnt;r++) {
         int i=vis_idx[r];

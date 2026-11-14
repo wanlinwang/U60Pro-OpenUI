@@ -88,6 +88,25 @@ impl Default for Settings {
         }
     }
 }
+fn page_number(s: &str) -> u32 {
+    match s {
+        "wireguard" => 0,
+        "devices" => 1,
+        "profiles" => 3,
+        "overview" => 4,
+        "proxy" => 5,
+        "clash" => 6,
+        "esim" => 7,
+        "uplink" => 8,
+        "wifi" => 9,
+        "signal" => 10,
+        "usb" => 11,
+        "power" => 12,
+        "booster" => 13,
+        "tailscale" => 14,
+        _ => 2,
+    }
+}
 impl Settings {
     fn validate(&self) -> Result<(), &'static str> {
         if !(20..=255).contains(&self.brightness) {
@@ -117,6 +136,16 @@ impl Settings {
         }
         Ok(())
     }
+    /// The separate optional record lets older screens ignore ordering safely.
+    pub fn menu_order_record(&self) -> String {
+        let pages = self
+            .menu_items
+            .iter()
+            .map(|item| page_number(item).to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("N {} {} {}\n", self.revision, self.menu_items.len(), pages)
+    }
     /// `C` for screens built before Proxy and Clash, which drop a record naming a page
     /// they lack: only their pages, all of them when none is chosen, and the menu as the
     /// startup page in place of a new one. WireGuard, Proxy or Clash brings all of
@@ -130,25 +159,11 @@ impl Settings {
     /// `W`, `Y` and `Z` end with the idle action (1 sleep, 0 stock UI); screens that read six
     /// fields of `W` return to the stock UI when idle.
     pub fn projection(&self) -> String {
-        let page = |s: &str| match s {
-            "wireguard" => 0,
-            "devices" => 1,
-            "profiles" => 3,
-            "overview" => 4,
-            "proxy" => 5,
-            "clash" => 6,
-            "esim" => 7,
-            "uplink" => 8,
-            "wifi" => 9,
-            "signal" => 10,
-            "usb" => 11,
-            "power" => 12,
-            "booster" => 13,
-            "tailscale" => 14,
-            _ => 2,
-        };
-        let mask = self.menu_items.iter().fold(0u32, |m, s| m | (1 << page(s)));
-        let home = page(&self.home_page);
+        let mask = self
+            .menu_items
+            .iter()
+            .fold(0u32, |m, s| m | (1 << page_number(s)));
+        let home = page_number(&self.home_page);
         // F adds Tailscale; older Z readers must never receive its bit/home.
         let ts = if mask & (1 << 14) != 0 {
             format!(
@@ -637,6 +652,16 @@ mod tests {
 #[cfg(test)]
 mod tailscale_settings_tests {
     use super::*;
+    #[test]
+    fn menu_order_record_preserves_order_and_revision() {
+        let mut settings = Settings::default();
+        settings.revision = 8;
+        settings.menu_items = ["clash", "overview", "tailscale"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(settings.menu_order_record(), "N 8 3 6 4 14\n");
+        assert!(settings.validate().is_ok());
+    }
     #[test]
     fn explicit_opt_in_keeps_menus_and_legacy_records() {
         let old = Settings::default();

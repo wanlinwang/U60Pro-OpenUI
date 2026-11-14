@@ -106,6 +106,8 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 | Startup page | Main menu or any visible feature; applies on the next opening |
 | Menu features | Up to nine of Overview, Proxy, WireGuard, Clash, eSIM, Wi-Fi relay, Wi-Fi, Signal, USB & TTL, Battery & charge, Booster, Saved profiles and Device routing; default Overview, Proxy, WireGuard, Clash |
 
+Drag enabled features by their handles in **DevUI → Menu features**, or use the up / down buttons, then save the settings to apply their order on the device. Ordering requires an updated agent and screen component; older screens keep their original order.
+
 At least one feature must remain visible and at most nine fit the menu: up to four show
 as rows, five to nine as a 3×3 grid of tiles (the toolbox). The DevUI webpage has a
 toolbox preset and a classic four-row preset. A saved list
@@ -289,8 +291,10 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   relay) with the idle action. Screens built before the idle action read six fields of
   `W` and return to the stock UI. `Z` has `Y`'s layout with the toolbox pages (9 Wi-Fi,
   10 5G signal, 11 USB & TTL, 12 battery & charge, 13 booster) and is sent only when one
-  of them is chosen; `Y` then leaves them out. Each screen uses the newest record it
-  accepts.
+  of them is chosen; `Y` then leaves them out. `F` adds Tailscale. Each screen uses the
+  newest record it accepts. An optional `N` record carries the settings revision and
+  the ordered page numbers; a new screen accepts it only when the revision and full
+  page mask match. Older screens ignore it and retain their original menu order.
   Tab-separated proxy records follow: `B` (active backend, conflict, per-backend
   revision, readiness and reason code), `K` (Clash summary), `U` (subscriptions, no
   URLs), `M` (core versions and job), `X`/`x` (diagnostics verdict and checks) and `E`

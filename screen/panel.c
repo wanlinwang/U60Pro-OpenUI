@@ -67,6 +67,7 @@ struct snapshot {
   int np, battery, temperature, charging; /* charging: 1 charging, 2 full, 0 not (or an older agent) */
   unsigned long long settings_rev;
   int idle_seconds, brightness, home_page, menu_mask, zh, idle_sleep;
+  int menu_order[9], menu_order_count;
   unsigned long long uptime;
   double memory, cpu;
   struct profile profiles[5];
@@ -113,6 +114,8 @@ static unsigned long long settings_revision;
 static int settings_idle = 120, settings_brightness = 128, settings_home = MENU, settings_menu = 113;
 /* Screen language follows the web panel (C record); Chinese until the first record. */
 static int settings_zh = 1;
+/* An absent or invalid ordering record keeps the original menu order. */
+static int settings_order[9], settings_order_count;
 /* Idle action from the W record: 1 turns the screen off and stays in DevUI, 0 returns to
  * the stock UI (also with older agents, whose W records end at the language). */
 static int settings_sleep = 0;
@@ -139,6 +142,8 @@ static int update_settings(const struct snapshot *s) {
   settings_idle = s->idle_seconds; settings_brightness = s->brightness;
   settings_home = s->home_page; settings_menu = s->menu_mask; settings_zh = s->zh;
   settings_sleep = s->idle_sleep;
+  settings_order_count = s->menu_order_count;
+  memcpy(settings_order, s->menu_order, sizeof(settings_order));
   return result;
 }
 static unsigned long long pending, pending_revision, chosen_profile, chosen_revision;
@@ -258,10 +263,31 @@ static void rotate_frame(struct drm_buf *b) {
     }
   }
 }
+/* N is optional. Reject malformed, repeated or partial orderings; the main settings
+ * record remains usable and older agents/screens keep their original menu order. */
+static int parse_menu_order(const char *line, unsigned long long *revision, int *pages, int *count, int *mask) {
+  int n = 0, pos = 0, bits = 0;
+  if (sscanf(line, "N %llu %d %n", revision, &n, &pos) != 2 || n < 1 || n > 9 || !pos) return 0;
+  const char *cursor = line + pos;
+  for (int i = 0; i < n; i++) {
+    while (*cursor == ' ') cursor++;
+    if (*cursor < '0' || *cursor > '9') return 0;
+    char *end;
+    long value = strtol(cursor, &end, 10);
+    if ((*end && *end != ' ') || value < 0 || value > TAILSCALE || value == MENU || (bits & (1 << value))) return 0;
+    pages[i] = (int)value; bits |= 1 << value; cursor = end;
+  }
+  while (*cursor == ' ') cursor++;
+  if (*cursor) return 0;
+  *count = n; *mask = bits;
+  return 1;
+}
 static int parse_snapshot(char *buf, struct snapshot *out) {
   struct snapshot s = {.battery = -1, .temperature = -999, .memory = -1};
   char *save, *line = strtok_r(buf, "\n", &save);
   int imei_seen = 0, imei_bad = 0;
+  int order_seen = 0, order_ok = 0, order_count = 0, order_mask = 0, order_pages[9] = {0};
+  unsigned long long order_rev = 0;
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
   int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0, w_sleep = 0;
   int y_ok = 0, y_idle = 0, y_level = 0, y_home = 0, y_mask = 0, y_sleep = 0;
@@ -285,6 +311,10 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
         s.settings_rev = rev; s.idle_seconds = idle; s.brightness = level;
         s.home_page = home; s.menu_mask = mask; s.zh = strcmp(lang, "en") != 0;
       }
+    }
+    else if (line[0] == 'N' && line[1] == ' ') {
+      if (order_seen++) order_ok = 0;
+      else order_ok = parse_menu_order(line, &order_rev, order_pages, &order_count, &order_mask);
     }
     /* V: the same settings with Proxy and Clash; preferred over C when valid. */
     else if (line[0] == 'V') {
@@ -420,6 +450,10 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
   } else if (v_ok) {
     s.settings_rev = v_rev; s.idle_seconds = v_idle; s.brightness = v_level;
     s.home_page = v_home; s.menu_mask = v_mask; s.zh = strcmp(v_lang, "en") != 0;
+  }
+  if (order_ok && order_seen == 1 && order_rev == s.settings_rev && order_mask == s.menu_mask) {
+    s.menu_order_count = order_count;
+    memcpy(s.menu_order, order_pages, sizeof(s.menu_order));
   }
   if(imei_bad)memset(&s.imei,0,sizeof(s.imei));
   if(s.relay.has&&(!s.uplink.has||s.relay.rev!=s.uplink.rev||s.relay.ns!=s.relay.saved_count||s.relay.nw!=s.relay.scan_count))s.relay.has=0;
@@ -2362,6 +2396,35 @@ int main(int argc, char **argv) {
   data.error=1;capture(&b,argv[1],"error");data.error=0;
   data.stamp=(unsigned long long)time(NULL)-20;capture(&b,argv[1],"stale");
   press_id(&b,"toggle");assert(!test_request[0]);
+  /* Ordered settings work for both rows and tiles; invalid extensions fall back. */
+  {
+    struct snapshot ordered;
+    char row[]="V 30 120 128 2 112 zh\nN 30 3 6 4 5\n.\n";
+    assert(parse_snapshot(row,&ordered)&&ordered.menu_order_count==3&&update_settings(&ordered));
+    page=MENU;render(&b);
+    const char *clash=strstr(html,"act:clash"),*overview=strstr(html,"act:overview"),*proxy=strstr(html,"act:proxy");
+    assert(clash&&overview&&proxy&&clash<overview&&overview<proxy);
+    char tiles[]="Z 31 120 128 2 752 zh 1\nN 31 5 9 7 6 5 4\n.\n";
+    assert(parse_snapshot(tiles,&ordered)&&ordered.menu_order_count==5&&update_settings(&ordered));
+    render(&b);
+    const char *wifi=strstr(html,"act:wifi"),*esim=strstr(html,"act:esim");
+    clash=strstr(html,"act:clash");overview=strstr(html,"act:overview");
+    assert(wifi&&esim&&clash&&overview&&wifi<esim&&esim<clash&&clash<overview);
+    char tailscale_order[]="F 33 120 128 2 16432 zh 1\nN 33 3 14 5 4\n.\n";
+    assert(parse_snapshot(tailscale_order,&ordered)&&ordered.menu_order_count==3&&update_settings(&ordered));
+    render(&b);
+    const char *ts=strstr(html,"act:tailscale");proxy=strstr(html,"act:proxy");overview=strstr(html,"act:overview");
+    assert(ts&&proxy&&overview&&ts<proxy&&proxy<overview);
+    char duplicate[]="V 32 120 128 2 112 zh\nN 32 3 6 6 4\n.\n";
+    char wrong_rev[]="V 32 120 128 2 112 zh\nN 31 3 6 4 5\n.\n";
+    char partial[]="V 32 120 128 2 112 zh\nN 32 2 6 4\n.\n";
+    char repeated[]="V 32 120 128 2 112 zh\nN 32 3 6 4 5\nN 32 3 5 4 6\n.\n";
+    assert(parse_snapshot(duplicate,&ordered)&&!ordered.menu_order_count);
+    assert(parse_snapshot(wrong_rev,&ordered)&&!ordered.menu_order_count);
+    assert(parse_snapshot(partial,&ordered)&&!ordered.menu_order_count);
+    assert(parse_snapshot(repeated,&ordered)&&!ordered.menu_order_count);
+    settings_revision=0;settings_order_count=0;
+  }
   char settings_line[]="C 3 60 200 4 16\n.\n";
   struct snapshot prefs; assert(parse_snapshot(settings_line,&prefs));
   assert(update_settings(&prefs)==2 && settings_idle==60 && settings_brightness==200 && settings_home==OVERVIEW);
