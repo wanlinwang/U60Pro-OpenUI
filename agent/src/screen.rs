@@ -4,6 +4,8 @@ use crate::{clash, clash_diag, handlers::AppState, network_ext, proxy, system, w
 // declared here so that main.rs needs no change.
 #[path = "screen_ipc.rs"]
 mod ipc;
+#[path = "screen_latency.rs"]
+mod screen_latency;
 #[path = "screen_sms.rs"]
 mod screen_sms;
 use ipc::{Cache, Esim, Job, Power, Request, Tool};
@@ -34,6 +36,7 @@ static INTEREST: AtomicU64 = AtomicU64::new(0);
 /// Last groups or nodes query; the proxies view is read only for the node pages.
 static PROXY_INTEREST: AtomicU64 = AtomicU64::new(0);
 static BUSY: AtomicBool = AtomicBool::new(false);
+static LATENCY_RESULTS: Mutex<Vec<screen_latency::Entry>> = Mutex::new(Vec::new());
 /// A restart or shutdown from the power menu is under way.
 static POWERING: AtomicBool = AtomicBool::new(false);
 static JOB: AtomicU64 = AtomicU64::new(0);
@@ -733,6 +736,7 @@ fn status() -> String {
 }
 /// A job with its handler's body; node work is resolved to names here.
 enum Work {
+    Latency(Vec<String>),
     Wireguard(Value),
     Backend(Value),
     Clash(Value),
@@ -756,6 +760,7 @@ enum Work {
 fn work(job: Job) -> Result<Work, &'static str> {
     let proxies = || PROXIES.lock().unwrap();
     Ok(match job {
+        Job::Latency(targets) => Work::Latency(targets),
         Job::SmsRefresh => Work::SmsRefresh,
         Job::SmsSend(draft) => Work::SmsSend {
             number: draft.number,
@@ -879,6 +884,15 @@ fn run_tool(t: &Tool) -> (u16, Value) {
 fn run(work: &Work) -> (u16, Value) {
     let body = |v: &Value| serde_json::to_vec(v).unwrap_or_default();
     match work {
+        Work::Latency(targets) => match screen_latency::probe_batch(targets) {
+            Ok(entries) => {
+                *LATENCY_RESULTS
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = entries;
+                (200, json!({"ok":true}))
+            }
+            Err(error) => (400, json!({"ok":false,"error":error})),
+        },
         Work::SmsRefresh => APP_STATE.get().map_or(
             (503, json!({"ok":false,"error":"SMS unavailable"})),
             |state| screen_sms::refresh(state),
@@ -1109,6 +1123,80 @@ fn request(line: &str) -> String {
     INTEREST.store(mono(), Ordering::Relaxed);
     match ipc::parse(line) {
         Ok(Request::Status) => status(),
+        Ok(Request::LatencyNames) => match screen_latency::ordered_names() {
+            Ok(names) => {
+                let mut reply = format!("NAMES {}\n", names.len());
+                for (index, (target, name)) in names.iter().enumerate() {
+                    let encoded: String = name.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
+                    reply.push_str(&format!("{index} {} {}\n", if target.is_empty() { "-" } else { target }, if encoded.is_empty() { "-" } else { &encoded }));
+                }
+                reply.push_str(".\n"); reply
+            }
+            Err(_) => "ERR Cannot read names\n".into(),
+        },
+        Ok(Request::LatencyName { index, target, name }) => match screen_latency::set_name(index, &target, &name) {
+            Ok(()) => "OK\n".into(), Err(_) => "ERR Cannot save name\n".into(),
+        },
+        Ok(Request::LatencyTargetsV3) => match screen_latency::ordered_targets() {
+            Ok(targets) => {
+                let mut reply = format!("TARGETS {}\n", targets.len());
+                for (index, target) in targets.iter().enumerate() {
+                    reply.push_str(&format!("{index} {}\n", if target.is_empty() { "-" } else { target }));
+                }
+                reply.push_str(".\n"); reply
+            }
+            Err(_) => "ERR Cannot read targets\n".into(),
+        },
+        Ok(Request::LatencySetV3 { index, target }) => match screen_latency::set_ordered(index, &target) {
+            Ok(()) => "OK\n".into(), Err(_) => "ERR Cannot save target\n".into(),
+        },
+        Ok(Request::LatencyMove { from, to }) => match screen_latency::move_ordered(from, to) {
+            Ok(()) => "OK\n".into(), Err(_) => "ERR Cannot reorder targets\n".into(),
+        },
+        Ok(Request::LatencyTargets { extended }) => match screen_latency::targets(extended) {
+            Ok(targets) => {
+                let mut reply = format!("TARGETS {}\n", targets.len());
+                for (index, target) in targets.iter().enumerate() {
+                    reply.push_str(&format!(
+                        "{index} {}\n",
+                        if target.is_empty() { "-" } else { target }
+                    ));
+                }
+                reply.push_str(".\n");
+                reply
+            }
+            Err(_) => "ERR Cannot read targets\n".into(),
+        },
+        Ok(Request::LatencySet { index, target }) => {
+            match screen_latency::set_target(index, &target) {
+                Ok(()) => "OK\n".into(),
+                Err(_) => "ERR Cannot save target\n".into(),
+            }
+        }
+        Ok(Request::LatencyResults) => {
+            let entries = LATENCY_RESULTS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let mut result = format!("LATENCY {}\n", entries.len());
+            for entry in entries.iter() {
+                let value = match entry.result {
+                    screen_latency::Probe::Reply(ms) => format!("{ms:.1}"),
+                    screen_latency::Probe::Tailscale { ms, ref path } => format!(
+                        "{}:{ms:.1}",
+                        match path {
+                            screen_latency::TailPath::Direct => "tsd",
+                            screen_latency::TailPath::Relay => "tsr",
+                            screen_latency::TailPath::Unknown => "tsu",
+                        }
+                    ),
+                    screen_latency::Probe::NoReply => "timeout".into(),
+                    screen_latency::Probe::Unavailable => "error".into(),
+                };
+                result.push_str(&format!("{} {}\n", entry.target, value));
+            }
+            result.push_str(".\n");
+            result
+        }
         Ok(Request::SmsPage { offset }) => screen_sms::legacy_page(offset),
         Ok(Request::SmsConversations { offset }) => screen_sms::page(offset),
         Ok(Request::SmsThread { key, offset }) => screen_sms::thread(&key.0, offset),

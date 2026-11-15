@@ -1,5 +1,40 @@
 /* SCREEN_PREVIEW only: synthetic SMS data and mock IPC. */
 static void sms_tests(struct drm_buf *b,const char *dir) {
+  char date[80];
+  sms_format_date_at(date,sizeof(date),"26;11;15;17;25;09;+8",480);assert(!strcmp(date,"2026-11-15 17:25"));
+  sms_format_date_at(date,sizeof(date),"26,11,15,17,25,09,+32",480);assert(!strcmp(date,"2026-11-15 17:25"));
+  sms_format_date_at(date,sizeof(date),"26,11,15,17,25,09,+32",0);assert(!strcmp(date,"2026-11-15 09:25"));
+  sms_format_date_at(date,sizeof(date),"26/11/15,17:25:09+32",0);assert(!strcmp(date,"2026-11-15 09:25"));
+  sms_format_date_at(date,sizeof(date),"26,11,15,17,25,09,-20",480);assert(!strcmp(date,"2026-11-16 06:25"));
+  sms_format_date_at(date,sizeof(date),"24;02;29;05;01;59;+5.75",345);assert(!strcmp(date,"2024-02-29 05:01"));
+  sms_format_date_at(date,sizeof(date),"2025-12-31T23:59:59+08:00",0);assert(!strcmp(date,"2025-12-31 15:59"));
+  sms_format_date_at(date,sizeof(date),"2025-12-31T23:59:59+0800",480);assert(!strcmp(date,"2025-12-31 23:59"));
+  sms_format_date_at(date,sizeof(date),"2025-12-31 23:59:59Z",480);assert(!strcmp(date,"2026-01-01 07:59"));
+  sms_format_date_at(date,sizeof(date),"26,11,15,17,25,09",0);assert(!strcmp(date,"2026-11-15 17:25"));
+  { const char *old_tz=getenv("TZ");char saved_tz[256];int had_tz=old_tz!=NULL;
+    if(had_tz)snprintf(saved_tz,sizeof(saved_tz),"%s",old_tz);
+    assert(setenv("TZ","EST5EDT,M3.2.0/2,M11.1.0/2",1)==0);tzset();
+    sms_format_date_at(date,sizeof(date),"2025-01-01T00:00:00Z",10000);assert(!strcmp(date,"2024-12-31 19:00"));
+    sms_format_date_at(date,sizeof(date),"2025-07-01T00:00:00Z",10000);assert(!strcmp(date,"2025-06-30 20:00"));
+    if(had_tz)assert(setenv("TZ",saved_tz,1)==0);else assert(unsetenv("TZ")==0);tzset();
+  }
+  { const char *old_tz=getenv("TZ");char saved_tz[256];int had_tz=old_tz!=NULL;
+    if(had_tz)snprintf(saved_tz,sizeof(saved_tz),"%s",old_tz);
+    char path[]="/tmp/openui-tz-test-XXXXXX";int fd=mkstemp(path);assert(fd>=0);
+    assert(write(fd,"UTC0\n",5)==5);close(fd);struct screen_tz_cache cache={0};
+    screen_timezone_read(&cache,path);assert(getenv("TZ")&&!strcmp(getenv("TZ"),"UTC0"));
+    FILE *f=fopen(path,"w");assert(f);fputs("UTC-8\n",f);fclose(f);
+    screen_timezone_read(&cache,path);assert(getenv("TZ")&&!strcmp(getenv("TZ"),"UTC-8"));
+    sms_format_date_at(date,sizeof(date),"2025-12-31T23:59:59Z",10000);assert(!strcmp(date,"2026-01-01 07:59"));
+    f=fopen(path,"w");assert(f);fputs("UTC-8;invalid\n",f);fclose(f);
+    screen_timezone_read(&cache,path);assert(getenv("TZ")&&!strcmp(getenv("TZ"),"UTC-8"));
+    assert(unlink(path)==0);screen_timezone_read(&cache,path);assert(getenv("TZ")==NULL);
+    if(had_tz)assert(setenv("TZ",saved_tz,1)==0);else assert(unsetenv("TZ")==0);tzset();
+  }
+  sms_format_date_at(date,sizeof(date),"25;02;29;05;01;02;+8",480);assert(!strcmp(date,"25;02;29;05;01;02;+8"));
+  sms_format_date_at(date,sizeof(date),"26;11;15;24;25;09;+8",480);assert(!strcmp(date,"26;11;15;24;25;09;+8"));
+  sms_format_date_at(date,sizeof(date),"26;11;15;17;25;09;+8BAD",480);assert(!strcmp(date,"26;11;15;17;25;09;+8BAD"));
+  sms_format_date_at(date,sizeof(date),"unknown",480);assert(!strcmp(date,"unknown"));
   char snapshot[512];
   snprintf(snapshot,sizeof(snapshot),"S 7 1 0 0 0 0 0 0 1 %llu\nF 4 120 128 2 16384 zh 1\nK 4 120 128 15 49152 zh 1\nF 4 120 128 14 16384 zh 1\nN 4 2 15 14\n",(unsigned long long)time(NULL));
   assert(parse_snapshot(snapshot,&data));
@@ -10,8 +45,24 @@ static void sms_tests(struct drm_buf *b,const char *dir) {
   stub_sms=list;stub_sms_thread=thread;
   test_log[0]=test_request[0]=0;press_id(b,"sms");expect_request("sms refresh\n");assert(pending_kind==JOB_SMS_LIST);
   reset_job();sms_fetch();assert(sms_ui.n==2&&!strcmp(sms_ui.rows[0].number,"+123"));
+  const char *list_first="SMS 6 0\nm\t2\t6e3a2b313233\t2b313233\t32303236\t6e6577\nm\t1\t6e3a393939\t393939\t32303236\t6f74686572\n.\n";
+  const char *list_last="SMS 6 4\nm\t1\t6e3a313131\t313131\t32303236\t6f6c64\n.\n";
+  stub_sms=list_first;sms_fetch();sms_drag_update(SMS_LIST,0,-50);assert(sms_ui.drag_shift==-50);
+  capture(b,dir,"sms-list-drag-synthetic");assert(strncmp(html_view_click(80,90),"act:sms_row",11));
+  stub_sms=list_last;sms_drag_finish(SMS_LIST);assert(sms_ui.offset==4&&sms_ui.n==1&&sms_ui.drag_shift==0);
+  stub_sms=list_first;sms_drag_update(SMS_LIST,0,50);sms_drag_finish(SMS_LIST);assert(sms_ui.offset==0&&sms_ui.n==2);
+  sms_drag_update(SMS_LIST,0,50);assert(!sms_ui.drag_shift);stub_sms=list;sms_fetch();
   press_id(b,"sms_row0");assert(sms_ui.view==SMS_THREAD&&sms_ui.n==2);expect_request("sms chat3 6e3a2b313233 0\n");
   render(b);assert(strstr(html,"你好")&&strstr(html,"new")&&strstr(html,"sms-in")&&strstr(html,"sms-out"));capture(b,dir,"sms-chat-synthetic");
+  char datehex[129],dated[512];relay_hex(datehex,"26;11;15;17;25;09;+8");
+  snprintf(dated,sizeof(dated),"CHAT 1 0\nb\t0\t1\t1\t%s\t48656c6c6f\n.\n",datehex);
+  { const char *old_tz=getenv("TZ");char saved_tz[256];int had_tz=old_tz!=NULL;
+    if(had_tz)snprintf(saved_tz,sizeof(saved_tz),"%s",old_tz);
+    assert(setenv("TZ","UTC0",1)==0);tzset();
+    stub_sms_thread=dated;sms_fetch();capture(b,dir,"sms-date-synthetic");assert(strstr(html,"2026-11-15 09:25")&&!strstr(html,"+8")&&!strstr(html,"26;11;15"));
+    if(had_tz)assert(setenv("TZ",saved_tz,1)==0);else assert(unsetenv("TZ")==0);tzset();
+  }
+  stub_sms_thread=thread;sms_fetch();
   char body[43],hex[85],longchat[600];memset(body,'W',42);body[42]=0;relay_hex(hex,body);
   snprintf(longchat,sizeof(longchat),"CHAT 2 0\nb\t1\t1\t2\t32303235\t%s\nb\t1\t2\t2\t32303235\t%s\n.\n",hex,hex);
   stub_sms_thread=longchat;sms_fetch();render(b);int seen=0;const char *scan=html;while((scan=strstr(scan,"WWWWWWWWWWWWWW"))){seen++;scan+=14;}
@@ -23,8 +74,22 @@ static void sms_tests(struct drm_buf *b,const char *dir) {
   stub_sms_thread=five;sms_fetch();assert(!sms_ui.load_error&&sms_ui.n==5);render(b);capture(b,dir,"sms-chat-five-synthetic");
   const char *six="CHAT 1 0\nb\t0\t1\t1\t32\t31\nb\t2\t1\t1\t32\t32\nb\t0\t1\t1\t32\t33\nb\t2\t1\t1\t32\t34\nb\t0\t1\t1\t32\t35\nb\t2\t1\t1\t32\t36\n.\n";
   stub_sms_thread=six;sms_fetch();assert(!sms_ui.load_error&&sms_ui.n==6);render(b);capture(b,dir,"sms-chat-six-synthetic");
+  press_id(b,"sms_reply");assert(sms_keyboard_inline()&&sms_chat_max_pan()>60);
+  snprintf(sms_ui.message,sizeof(sms_ui.message),"Draft");relay_keyboard_cache.valid=1;
+  sms_drag_update(SMS_THREAD,0,60);assert(sms_ui.pan==60&&!relay_keyboard_cache.valid&&!strcmp(sms_ui.message,"Draft"));
+  sms_drag_finish(SMS_THREAD);assert(sms_ui.pan==60&&!strcmp(sms_ui.message,"Draft"));
+  sms_ui.total=2;sms_ui.pan=sms_chat_max_pan();
+  stub_sms_thread="CHAT 2 1\nb\t0\t1\t1\t32303234\t6f6c64\n.\n";
+  sms_drag_update(SMS_THREAD,sms_ui.pan,50);sms_drag_finish(SMS_THREAD);
+  assert(sms_ui.thread_offset==1&&!strcmp(sms_ui.message,"Draft")&&sms_keyboard_inline());
+  stub_sms_thread=six;sms_drag_update(SMS_THREAD,0,-50);sms_drag_finish(SMS_THREAD);
+  assert(sms_ui.thread_offset==0&&!strcmp(sms_ui.message,"Draft")&&sms_keyboard_inline());
+  capture(b,dir,"sms-inline-drag-synthetic");relay_press(b,"back");assert(!sms_keyboard_inline()&&sms_ui.pan==0);sms_ui.message[0]=0;
   stub_sms_legacy_agent=1;stub_sms_thread=five;sms_fetch();expect_request("sms chat2 6e3a2b313233 0\n");assert(!sms_ui.load_error&&sms_ui.n==5);stub_sms_legacy_agent=0;
   stub_sms_thread=thread;sms_fetch();
+  stub_sms_thread="CHAT 2 1\nb\t0\t1\t1\t32303234\t6f6c64\n.\n";
+  sms_drag_update(SMS_THREAD,0,50);assert(sms_ui.drag_shift==50);sms_drag_finish(SMS_THREAD);assert(sms_ui.thread_offset==1&&!strcmp(sms_ui.rows[0].content,"old"));
+  stub_sms_thread=thread;sms_drag_update(SMS_THREAD,0,-50);sms_drag_finish(SMS_THREAD);assert(sms_ui.thread_offset==0&&!strcmp(sms_ui.rows[1].content,"new"));
   stub_sms_thread="CHAT 2 1\nb\t0\t1\t1\t32303234\t6f6c64\n.\n";
   press_id(b,"sms_older");assert(sms_ui.thread_offset==1&&sms_ui.n==1&&!strcmp(sms_ui.rows[0].content,"old"));
   stub_sms_thread=thread;press_id(b,"sms_newer");assert(sms_ui.thread_offset==0&&sms_ui.n==2);
@@ -50,5 +115,17 @@ static void sms_tests(struct drm_buf *b,const char *dir) {
   memset(sms_ui.number,'8',32);sms_ui.number[32]=0;memset(sms_ui.message,'W',160);sms_ui.message[160]=0;capture(b,dir,"sms-confirm-long-synthetic");
   snprintf(sms_ui.number,sizeof(sms_ui.number),"12");snprintf(sms_ui.message,sizeof(sms_ui.message),"Hi!");press_id(b,"sms_send");expect_request("sms send 3132 486921\n");
   reset_job();press_id(b,"back");assert(page==MENU&&!sms_ui.rows[0].content[0]);expect_request("sms clear\n");
+  /* Chinese input remains offline and draft-only; hit the real compact keyboard. */
+  page=SMS_PAGE;sms_ui.view=SMS_THREAD;snprintf(sms_ui.thread_key,sizeof(sms_ui.thread_key),"n:+123");
+  sms_ui.message[0]=0;relay_edit.active=1;relay_key_open(RK_SMS_BODY);
+  ime_press(b,"rime");ime_press(b,"rk6e");ime_press(b,"rk69");
+  assert(!strcmp(relay_edit.pinyin,"ni"));capture(b,dir,"sms-pinyin-candidates-synthetic");ime_press(b,"rpick0");assert(!strcmp(sms_ui.message,"你"));
+  ime_press(b,"rk68");ime_press(b,"rk61");ime_press(b,"rk6f");ime_press(b,"rpick0");assert(!strcmp(sms_ui.message,"你好"));
+  capture(b,dir,"sms-inline-chinese-input-synthetic");ime_press(b,"rbs");assert(!strcmp(sms_ui.message,"你"));
+  ime_press(b,"rime");ime_press(b,"rk61");assert(!strcmp(sms_ui.message,"你a"));
+  ime_press(b,"rime");ime_press(b,"rk6e");ime_press(b,"rk69");ime_press(b,"rinext");assert(relay_edit.candidate_page==1);
+  ime_press(b,"riprev");assert(relay_edit.candidate_page==0);ime_press(b,"rbs");ime_press(b,"rbs");
+  ime_press(b,"rkdone");assert(!strcmp(sms_ui.message,"你a")&&relay_view!=RV_KEYBOARD);
+  relay_wipe(&sms_ui,sizeof(sms_ui));relay_editor_clear();relay_view=RV_STATUS;page=MENU;
   stub_sms=stub_sms_thread=NULL;reset_job();test_log[0]=test_request[0]=0;
 }

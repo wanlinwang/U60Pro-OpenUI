@@ -317,6 +317,7 @@ mod tests {
         assert_eq!(encode_message("😀"), "1F600");
         assert_eq!(encode_type("Hello"), "GSM7_default");
         assert_eq!(encode_type("你好"), "UNICODE");
+        assert_eq!(encode_message("你好"), "4F60597D");
     }
 
     #[test]

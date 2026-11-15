@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #ifndef SCREEN_PREVIEW
 #include "qpic.h"
 #include <dirent.h>
@@ -57,6 +58,31 @@ static void draw_pixel(struct drm_buf *b, int x, int y, uint16_t c) {
 #define RED 0xfa8a
 #define RUNDIR "/tmp/openui-screen"
 #define BL "/sys/class/leds/led:lcd/brightness"
+/* This statically linked musl build normally reads /etc/localtime, but the
+   factory firmware configures POSIX zones in /etc/TZ instead. Refresh only
+   when that file changes so the screen follows the system without restarting. */
+struct screen_tz_cache {char previous[128];int initialized,was_present;};
+static void screen_timezone_read(struct screen_tz_cache *cache,const char *path) {
+  char buf[128];FILE *f=fopen(path,"r");int present=0;
+  if(f) {
+    if(fgets(buf,sizeof(buf),f)) {
+      size_t n=strlen(buf);if(n&&buf[n-1]=='\n')buf[--n]=0;
+      if(n&&n<sizeof(buf)-1) {present=1;for(size_t i=0;i<n;i++)if(!isalnum((unsigned char)buf[i])&&!strchr("+-:,.<>/_",buf[i]))present=0;}
+    }
+    fclose(f);
+    if(!present)return;
+  } else if(errno!=ENOENT)return;
+  if(cache->initialized&&present==cache->was_present&&(!present||!strcmp(cache->previous,buf)))return;
+  if(present){if(setenv("TZ",buf,1))return;snprintf(cache->previous,sizeof(cache->previous),"%s",buf);}
+  else {if(unsetenv("TZ"))return;cache->previous[0]=0;}
+  tzset();cache->initialized=1;cache->was_present=present;
+}
+static void screen_system_timezone(void) {
+#ifndef SCREEN_PREVIEW
+  static struct screen_tz_cache cache;
+  screen_timezone_read(&cache,"/etc/TZ");
+#endif
+}
 struct row {
   char mac[18], ip[48], name[193];
   int selected, online;
@@ -102,7 +128,7 @@ static int screen_awake = 1;
 #endif
 /* Menu features first (their numbers are the settings record's page bits), then pages
  * reached from them. */
-enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_PAGE, SIGNAL_PAGE, USB_PAGE, POWER_PAGE, BOOSTER_PAGE, TAILSCALE, SMS_PAGE, STOCK_MENU, NODES, GROUP, SUBS, CORE, DIAG, CFOPT, IMEI_PAGE, DASHBOARD };
+enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_PAGE, SIGNAL_PAGE, USB_PAGE, POWER_PAGE, BOOSTER_PAGE, TAILSCALE, SMS_PAGE, STOCK_MENU, NODES, GROUP, SUBS, CORE, DIAG, CFOPT, IMEI_PAGE, DASHBOARD, LATENCY_PAGE };
 #define LEGACY_PAGES 27  /* features of a C record: WireGuard, devices, profiles, overview */
 #define MENU_PAGES 123   /* features of a V record: the above plus proxy and Clash */
 #define ESIM_MENU_PAGES 251 /* features of a W record: the above plus eSIM */
@@ -130,6 +156,7 @@ static int settings_sleep = 0;
 #define L(en, zh) (settings_zh ? (zh) : (en))
 static int visible_page(int p) {
   if(p==STOCK_MENU)return !settings_native_menu || (settings_menu & (1 << STOCK_MENU));
+  if(p==LATENCY_PAGE)return settings_native_menu && (settings_menu & (1 << LATENCY_PAGE));
   return p == MENU || p == DASHBOARD || (p >= 0 && p <= SMS_PAGE && (settings_menu & (1 << p)));
 }
 /* Saved profiles and device routing belong to WireGuard; node, subscription and core
@@ -162,11 +189,36 @@ static unsigned long long pending, pending_revision, chosen_profile, chosen_revi
 static char chosen_name[193];
 static char notice[128], failure_text[97];
 /* What the pending job does, for its labels and its completion. */
-enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM, JOB_UPLINK, JOB_TOOL, JOB_TS, JOB_ADMIN, JOB_CFOPT, JOB_SMS_LIST, JOB_SMS_SEND };
+enum { JOB_WG = 1, JOB_BACKEND, JOB_MODE, JOB_SUB, JOB_REFRESH, JOB_SELECT, JOB_DELAY, JOB_CORE, JOB_DIAG, JOB_ESIM, JOB_UPLINK, JOB_TOOL, JOB_TS, JOB_ADMIN, JOB_CFOPT, JOB_SMS_LIST, JOB_SMS_SEND, JOB_LATENCY };
 static int pending_kind;
 enum { SMS_LIST, SMS_THREAD, SMS_DETAIL, SMS_COMPOSE, SMS_CONFIRM };
 struct sms_row { int tag, part, parts; char key[99], number[97], date[65], content[2049]; };
-static struct { int view, total, offset, thread_offset, n, chosen, text_offset, load_error, from_thread; char thread_key[99], thread_number[97], number[33], message[161], before[161]; struct sms_row rows[6]; } sms_ui;
+static struct { int view, total, offset, thread_offset, n, chosen, text_offset, load_error, from_thread, pan, drag_shift; char thread_key[99], thread_number[97], number[33], message[161], before[161]; struct sms_row rows[6]; } sms_ui;
+#define LATENCY_SLOTS 24
+#define LATENCY_PAGE_SIZE 6
+#define LATENCY_LIST_TOP 56
+#define LATENCY_ROW_STEP 51
+#define LATENCY_LIST_HEIGHT (LATENCY_PAGE_SIZE*LATENCY_ROW_STEP)
+static struct { char targets[LATENCY_SLOTS][65], names[LATENCY_SLOTS][73], edit[73], before[73], results[LATENCY_SLOTS][32]; int slot, slots, loaded, result_error, scroll, sorted, moving, name_support, details; } latency_ui;
+/* Show saved targets densely, followed by at most one editable empty slot.
+   Logical indices remain the agent's indices, including across legacy holes. */
+static int latency_target_count(void) {int n=0;for(int i=0;i<latency_ui.slots;i++)n+=latency_ui.targets[i][0]!=0;return n;}
+static int latency_last_target(void) {for(int i=latency_ui.slots-1;i>=0;i--)if(latency_ui.targets[i][0])return i;return -1;}
+static int latency_visible_count(void) {int n=latency_target_count();return n+(n<latency_ui.slots);}
+static int latency_visible_slot(int pos) {
+  int n=0,last=latency_last_target();
+  for(int i=0;i<latency_ui.slots;i++)if(latency_ui.targets[i][0]&&n++==pos)return i;
+  if(pos!=n)return -1;
+  for(int i=last+1;i<latency_ui.slots;i++)if(!latency_ui.targets[i][0])return i;
+  for(int i=0;i<=last;i++)if(!latency_ui.targets[i][0])return i;
+  return -1;
+}
+static int latency_max_scroll(void) {int h=latency_visible_count()*LATENCY_ROW_STEP-LATENCY_LIST_HEIGHT;return h>0?h:0;}
+static void latency_scroll_to(int y) {int max=latency_max_scroll();if(y<0)y=0;if(y>max)y=max;if(latency_ui.scroll!=y){latency_ui.scroll=y;need_draw=1;}}
+static void latency_clamp_page(void) {latency_scroll_to(latency_ui.scroll);}
+static int latency_fetch_targets(void);
+static void latency_fetch_results(void);
+static int latency_tap(const char *a);
 static void sms_fetch(void);
 static int sms_reply_number(void);
 static void sms_leave(void);
@@ -196,7 +248,7 @@ static long long monotonic_ms(void) {
  * the start of a diagnosis answers in seconds. Past it the job is taken as lost. */
 static long long job_wait_ms(int kind) {
   /* An eSIM action only starts the agent's own job, which its Q record then follows. */
-  return kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG || kind == JOB_ESIM || kind == JOB_UPLINK || kind == JOB_TOOL || kind == JOB_ADMIN || kind == JOB_CFOPT ? 60000 : 180000;
+  return kind == JOB_LATENCY ? 90000 : kind == JOB_SELECT || kind == JOB_DELAY || kind == JOB_DIAG || kind == JOB_ESIM || kind == JOB_UPLINK || kind == JOB_TOOL || kind == JOB_ADMIN || kind == JOB_CFOPT ? 60000 : 180000;
 }
 static void amount(char *out, size_t n, unsigned long long v) {
   if (v >= 1073741824)
@@ -292,7 +344,7 @@ static int parse_menu_order(const char *line, unsigned long long *revision, int 
     if (*cursor < '0' || *cursor > '9') return 0;
     char *end;
     long value = strtol(cursor, &end, 10);
-    if ((*end && *end != ' ') || value < 0 || value > (extended?STOCK_MENU:SMS_PAGE) || value == MENU || (bits & (1 << value))) return 0;
+    if ((*end && *end != ' ') || value < 0 || (value > (extended?STOCK_MENU:SMS_PAGE) && !(extended && value==LATENCY_PAGE)) || value == MENU || (bits & (1 << value))) return 0;
     pages[i] = (int)value; bits |= 1 << value; cursor = end;
   }
   while (*cursor == ' ') cursor++;
@@ -345,8 +397,8 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     else if (line[0] == 'v' && line[1] == ' ') {
       char lang[4]="";unsigned long long rev;int idle,level,home,mask,sleep,clock;
       if(!x_seen++ && sscanf(line+1," %llu %d %d %d %d %3s %d %d",&rev,&idle,&level,&home,&mask,lang,&sleep,&clock)==8 &&
-         idle>=30&&idle<=600&&level>=20&&level<=255&&home>=0&&home<=SMS_PAGE&&mask>0&&
-         !(mask & ~(SMS_MENU_PAGES | (1 << STOCK_MENU)))&&(home==MENU||(mask&(1<<home)))&&
+         idle>=30&&idle<=600&&level>=20&&level<=255&&home>=0&&(home<=SMS_PAGE||home==LATENCY_PAGE)&&mask>0&&
+         !(mask & ~(SMS_MENU_PAGES | (1 << STOCK_MENU) | (1 << LATENCY_PAGE)))&&(home==MENU||(mask&(1<<home)))&&
          (sleep==0||sleep==1)&&(!strcmp(lang,"zh")||!strcmp(lang,"en"))&&
          (clock==10000||(clock>=-720&&clock<=840))) {
         x_ok=1;x_rev=rev;x_idle=idle;x_level=level;x_home=home;x_mask=mask;x_sleep=sleep;x_clock=clock;
@@ -533,14 +585,14 @@ static int exchange(const char *request, char *reply, size_t cap) {
 #else
 /* Preview: the last request, all requests since the log was cleared, canned replies. */
 static char test_request[4096], test_log[8192];
-static const char *stub_groups, *stub_nodes, *stub_status, *stub_sms, *stub_sms_thread, *stub_job = "OK 1\n";
+static const char *stub_groups, *stub_nodes, *stub_status, *stub_sms, *stub_sms_thread, *stub_latency_targets, *stub_latency_targets2, *stub_latency_targets3, *stub_latency_names, *stub_latency_results, *stub_latency_set, *stub_job = "OK 1\n";
 static int stub_sms_legacy_agent;
 static int exchange(const char *r, char *out, size_t cap) {
   snprintf(test_request, sizeof(test_request), "%s", r);
   size_t used = strlen(test_log);
   snprintf(test_log + used, sizeof(test_log) - used, "%s", r);
   if (stub_sms_legacy_agent && !strncmp(r, "sms chat3 ", 10)) {snprintf(out,cap,"ERR unsupported\n");return 0;}
-  const char *reply = !strcmp(r,"status\n")?stub_status:!strncmp(r, "sms conversations ", 18) ? stub_sms : (!strncmp(r, "sms chat2 ", 10) || !strncmp(r, "sms chat3 ", 10)) ? stub_sms_thread : !strncmp(r, "groups ", 7) ? stub_groups : !strncmp(r, "nodes ", 6) ? stub_nodes : stub_job;
+  const char *reply = !strcmp(r,"status\n")?stub_status:!strcmp(r,"latency targets3\n")?stub_latency_targets3:!strcmp(r,"latency names\n")?stub_latency_names:!strcmp(r,"latency targets2\n")?stub_latency_targets2:!strcmp(r,"latency targets\n")?stub_latency_targets:!strcmp(r,"latency results\n")?stub_latency_results:(!strncmp(r,"latency set ",12)||!strncmp(r,"latency set3 ",13)||!strncmp(r,"latency move ",13)||!strncmp(r,"latency name ",13))?stub_latency_set:!strncmp(r, "sms conversations ", 18) ? stub_sms : (!strncmp(r, "sms chat2 ", 10) || !strncmp(r, "sms chat3 ", 10)) ? stub_sms_thread : !strncmp(r, "groups ", 7) ? stub_groups : !strncmp(r, "nodes ", 6) ? stub_nodes : stub_job;
   if (!reply) return -1;
   snprintf(out, cap, "%s", reply);
   return 0;
@@ -621,6 +673,7 @@ static void submit(int toggle, int value) {
   }
   send_job(req, kind, toggle == 2 ? chosen_revision : toggle ? data.rev : draft.rev);
 }
+#include "devui/latency_actions.h"
 #include "devui/actions.h"
 static const char *job_failure(int kind, int result) {
   if (result == 1)
@@ -638,6 +691,7 @@ static const char *job_failure(int kind, int result) {
   case JOB_UPLINK: return L("Wi-Fi relay request failed. Check its status.", "无线中继请求失败，请检查状态。");
   case JOB_SMS_LIST: return L("Cannot load SMS. Check the service.", "无法读取短信，请检查短信服务。");
   case JOB_SMS_SEND: return L("Send failed or outcome unknown. Check Sent before retrying.", "发送失败或结果未知；重试前请检查已发送短信。");
+  case JOB_LATENCY: return L("Latency test failed.", "延时测试失败。");
   case JOB_ADMIN: return L("Service change failed. Reload status; do not retry blindly.", "服务更改失败。请刷新状态，勿盲目重试。");
   default: return L("Apply failed. Check OpenUI.", "应用失败，请在 OpenUI 中检查。");
   }
@@ -696,6 +750,7 @@ static void settle_jobs(void) {
     return_after_save = 0;
   }
   if (kind == JOB_SMS_LIST) sms_fetch();
+  if (kind == JOB_LATENCY && page == LATENCY_PAGE) latency_fetch_results();
   if (kind == JOB_SMS_SEND && page==SMS_PAGE) {
     relay_wipe(sms_ui.number,sizeof(sms_ui.number)); relay_wipe(sms_ui.message,sizeof(sms_ui.message));
     sms_ui.view=sms_ui.from_thread?SMS_THREAD:SMS_LIST;sms_ui.thread_offset=0;sms_ui.from_thread=0;
@@ -708,7 +763,7 @@ static void settle_jobs(void) {
 /* After each status: settings, the device draft, pages that are no longer shown, jobs. */
 static void track_status(int changed) {
   int imei_was_open=page==IMEI_PAGE;
-  if(relay_edit.active&&page!=SMS_PAGE&&(page!=UPLINK||!data.relay.has||stale()||relay_edit.rev!=data.uplink.rev||
+  if(relay_edit.active&&page!=SMS_PAGE&&page!=LATENCY_PAGE&&(page!=UPLINK||!data.relay.has||stale()||relay_edit.rev!=data.uplink.rev||
       (relay_edit.from_scan&&(!relay_scan_fresh()||relay_edit.gen!=data.relay.gen))))relay_invalidate();
   int relay_total=relay_view==RV_SCAN?data.relay.nw:data.relay.ns;
   if(relay_offset>=relay_total)relay_offset=relay_total?(relay_total-1)/4*4:0;
@@ -716,6 +771,7 @@ static void track_status(int changed) {
     page = settings_home == MENU ? DASHBOARD : settings_home;
     if (page == DEVICES) enter_devices();
     else if (page == SMS_PAGE) go(SMS_PAGE);
+    else if (page == LATENCY_PAGE) go(LATENCY_PAGE);
     else refresh_page();
   }
   if (page == DEVICES && !dirty && !pending && !dialog) {
@@ -988,12 +1044,16 @@ struct input_touch {
   int fd, slot, id[2], x, y, xok, yok;
   struct input_absinfo ax, ay;
   int down, sx, sy, moved, multi, dropped, suppress, wait_clean, resync_failed;
+  int latency_drag, latency_dragging, latency_scroll_start;
+  int sms_drag, sms_dragging, sms_pan_start;
 };
 /* MT-B axes are state, not per-contact fields: the input core can omit an
  * unchanged X or Y even after a new tracking ID. Query slot zero on open/resync
  * and retain its known axes between contacts; never invent missing positions. */
 static void input_resync_apply(struct input_touch *t,int valid,int slot,int x,int y,int id0,int id1) {
-  t->down=0;t->xok=t->yok=0;t->wait_clean=1;t->resync_failed=1;
+  if(t->sms_dragging&&page==SMS_PAGE)sms_drag_cancel(t->sms_pan_start);
+  t->sms_drag=t->sms_dragging=0;
+  t->down=0;t->latency_drag=0;t->latency_dragging=0;t->xok=t->yok=0;t->wait_clean=1;t->resync_failed=1;
   if(!valid||slot<0||slot>1||id0< -1||id1< -1||
      x<t->ax.minimum||x>t->ax.maximum||y<t->ay.minimum||y>t->ay.maximum)return;
   t->slot=slot;t->x=x;t->y=y;t->xok=t->yok=1;
@@ -1040,8 +1100,11 @@ static int axis(int v, struct input_absinfo *a, int size) {
 static int input_event(struct input_touch *t, struct input_event *e) {
   if(t->resync_failed)return -1;
   if (e->type == EV_SYN && e->code == SYN_DROPPED) {
+    if(t->sms_dragging&&page==SMS_PAGE)sms_drag_cancel(t->sms_pan_start);
+    t->sms_drag=t->sms_dragging=0;
     t->dropped = 1;
     t->down = 0;
+    t->latency_drag = t->latency_dragging = 0;
     t->wait_clean = 1;
     t->id[0] = t->id[1] = -1;
     return 0;
@@ -1090,14 +1153,43 @@ static int input_event(struct input_touch *t, struct input_event *e) {
       t->sy = y;
       t->moved = 0;
       t->multi = t->id[1] >= 0;
+      t->latency_drag = page==LATENCY_PAGE && relay_view!=RV_KEYBOARD && !dialog &&
+        y>=LATENCY_LIST_TOP && y<LATENCY_LIST_TOP+LATENCY_LIST_HEIGHT;
+      t->latency_dragging=0;t->latency_scroll_start=latency_ui.scroll;
+      t->sms_drag=0;t->sms_dragging=0;t->sms_pan_start=sms_ui.pan;
+      if(page==SMS_PAGE&&!dialog&&sms_ui.n>0) {
+        if(sms_ui.view==SMS_LIST&&relay_view!=RV_KEYBOARD&&y>=100&&y<328)t->sms_drag=SMS_LIST+1;
+        if(sms_ui.view==SMS_THREAD&&y>=50&&y<(sms_keyboard_inline()?210:360))t->sms_drag=SMS_THREAD+1;
+      }
     }
     if (!screen_awake || t->suppress) t->multi = 1;
     if (abs(x - t->sx) > 12 || abs(y - t->sy) > 12)
       t->moved = 1;
+    if(t->latency_drag && screen_awake && !t->suppress && !t->multi && page==LATENCY_PAGE && !dialog && relay_view!=RV_KEYBOARD) {
+      int dy=y-t->sy,dx=x-t->sx;
+      if(!t->latency_dragging && abs(dy)>12 && abs(dy)>abs(dx))t->latency_dragging=1;
+      if(t->latency_dragging)latency_scroll_to(t->latency_scroll_start-dy);
+    }
+    if(t->sms_drag) {
+      if(!screen_awake||t->suppress||t->multi||page!=SMS_PAGE||dialog||sms_ui.view!=t->sms_drag-1) {
+        if(t->sms_dragging&&page==SMS_PAGE)sms_drag_cancel(t->sms_pan_start);
+        t->sms_drag=t->sms_dragging=0;
+      } else {
+        int dy=y-t->sy,dx=x-t->sx;
+        if(!t->sms_dragging&&abs(dy)>12&&abs(dy)>abs(dx))t->sms_dragging=1;
+        if(t->sms_dragging)sms_drag_update(t->sms_drag-1,t->sms_pan_start,dy);
+      }
+    }
   } else if (t->down && t->id[0] < 0) {
+    if(t->sms_dragging) {
+      if(screen_awake&&!t->suppress&&!t->multi&&page==SMS_PAGE&&!dialog&&sms_ui.view==t->sms_drag-1)sms_drag_finish(t->sms_drag-1);
+      else if(page==SMS_PAGE)sms_drag_cancel(t->sms_pan_start);
+    }
     if (screen_awake && !t->suppress && !t->multi && !t->moved)
       tap(t->sx, t->sy);
     t->down = 0;
+    t->latency_drag=t->latency_dragging=0;
+    t->sms_drag=t->sms_dragging=0;
     return 1;
   }
   return t->id[0] >= 0;
@@ -1107,6 +1199,16 @@ static int input_draw_boundary(int was_dirty) {
 }
 static int input_self_test(void) {
   power_self_test();
+  char sms_date[80];
+  sms_format_date_at(sms_date,sizeof(sms_date),"26,11,15,17,25,09,+32",0);
+  assert(!strcmp(sms_date,"2026-11-15 09:25"));
+  sms_format_date_at(sms_date,sizeof(sms_date),"2025-12-31T23:59:59Z",480);
+  assert(!strcmp(sms_date,"2026-01-01 07:59"));
+  screen_system_timezone();
+  if(getenv("TZ")&&!strcmp(getenv("TZ"),"UTC-8")) {
+    char clock[8];status_clock(clock,1704067200,10000);assert(!strcmp(clock,"08:00"));
+    sms_format_date(sms_date,sizeof(sms_date),"2025-12-31T23:59:59Z");assert(!strcmp(sms_date,"2026-01-01 07:59"));
+  }
   struct drm_buf frame = {.pitch = W * 2, .map = calloc(W * H, 2)};
   assert(frame.map);
   page = MENU;
@@ -1247,6 +1349,57 @@ static int input_self_test(void) {
     struct input_event e=events[i];input_event(&t,&e);
   }
   assert(quitting);quitting=0;
+  /* One finger moves the latency list continuously, without triggering a row. */
+  page=LATENCY_PAGE;dialog=0;relay_view=RV_STATUS;screen_awake=1;
+  latency_ui.slots=LATENCY_SLOTS;latency_ui.loaded=1;latency_ui.scroll=0;
+  for(int i=0;i<12;i++)snprintf(latency_ui.targets[i],65,"host%d.example",i);
+  struct input_touch drag={.fd=-1,.id={-1,-1},.ax=t.ax,.ay=t.ay};
+  struct input_event swipe[]={
+    {.type=EV_ABS,.code=ABS_MT_SLOT,.value=0},
+    {.type=EV_ABS,.code=ABS_MT_TRACKING_ID,.value=1},
+    {.type=EV_ABS,.code=ABS_MT_POSITION_X,.value=159},
+    {.type=EV_ABS,.code=ABS_MT_POSITION_Y,.value=179}, /* y=300 */
+    {.type=EV_SYN,.code=SYN_REPORT},
+    {.type=EV_ABS,.code=ABS_MT_POSITION_Y,.value=229}, /* y=250 */
+    {.type=EV_SYN,.code=SYN_REPORT},
+    {.type=EV_ABS,.code=ABS_MT_POSITION_Y,.value=269}, /* y=210 */
+    {.type=EV_SYN,.code=SYN_REPORT},
+    {.type=EV_ABS,.code=ABS_MT_TRACKING_ID,.value=-1},
+    {.type=EV_SYN,.code=SYN_REPORT}};
+  for(size_t i=0;i<sizeof(swipe)/sizeof(swipe[0]);i++) {
+    struct input_event e=swipe[i];input_event(&drag,&e);
+    if(i==6)assert(latency_ui.scroll==50&&drag.latency_dragging);
+  }
+  assert(latency_ui.scroll==90&&!drag.down&&!dialog&&relay_view==RV_STATUS);
+  /* A new second finger cancels scrolling, and a dark touch cannot move it. */
+  drag=(struct input_touch){.fd=-1,.id={-1,-1},.ax=t.ax,.ay=t.ay};
+  for(size_t i=0;i<5;i++){struct input_event e=swipe[i];input_event(&drag,&e);}
+  struct input_event e={.type=EV_ABS,.code=ABS_MT_SLOT,.value=1};input_event(&drag,&e);
+  e=(struct input_event){.type=EV_ABS,.code=ABS_MT_TRACKING_ID,.value=2};input_event(&drag,&e);
+  e=(struct input_event){.type=EV_ABS,.code=ABS_MT_SLOT,.value=0};input_event(&drag,&e);
+  for(size_t i=5;i<9;i++){e=swipe[i];input_event(&drag,&e);}assert(latency_ui.scroll==90);
+  memset(&latency_ui,0,sizeof(latency_ui));page=MENU;
+  /* An inline conversation moves under a single finger without touching the
+     input/Send controls; this uses synthetic messages and no SMS requests. */
+  page=SMS_PAGE;relay_view=RV_KEYBOARD;relay_edit.active=1;sms_ui.view=SMS_THREAD;
+  sms_ui.total=1;sms_ui.thread_offset=0;sms_ui.n=6;sms_ui.pan=0;sms_ui.drag_shift=0;
+  snprintf(sms_ui.message,sizeof(sms_ui.message),"draft");
+  for(int i=0;i<6;i++)snprintf(sms_ui.rows[i].content,sizeof(sms_ui.rows[i].content),"test");
+  drag=(struct input_touch){.fd=-1,.id={-1,-1},.ax=t.ax,.ay=t.ay};
+  swipe[3].value=319;swipe[5].value=269;swipe[7].value=269;
+  for(size_t i=0;i<sizeof(swipe)/sizeof(swipe[0]);i++){e=swipe[i];input_event(&drag,&e);}
+  assert(sms_ui.pan==50&&!sms_ui.drag_shift&&!strcmp(sms_ui.message,"draft")&&!dialog&&sms_ui.view==SMS_THREAD);
+  sms_ui.pan=0;drag=(struct input_touch){.fd=-1,.id={-1,-1},.ax=t.ax,.ay=t.ay};
+  for(size_t i=0;i<7;i++){e=swipe[i];input_event(&drag,&e);}assert(sms_ui.pan==50);
+  e=(struct input_event){.type=EV_ABS,.code=ABS_MT_SLOT,.value=1};input_event(&drag,&e);
+  e=(struct input_event){.type=EV_ABS,.code=ABS_MT_TRACKING_ID,.value=3};input_event(&drag,&e);
+  e=(struct input_event){.type=EV_SYN,.code=SYN_REPORT};input_event(&drag,&e);
+  assert(sms_ui.pan==0&&!sms_ui.drag_shift&&!drag.sms_dragging&&!strcmp(sms_ui.message,"draft"));
+  drag=(struct input_touch){.fd=-1,.id={-1,-1},.ax=t.ax,.ay=t.ay};
+  swipe[3].value=229;swipe[5].value=279;swipe[7].value=279; /* starts in keyboard */
+  for(size_t i=0;i<sizeof(swipe)/sizeof(swipe[0]);i++){e=swipe[i];input_event(&drag,&e);}
+  assert(sms_ui.pan==0&&!sms_ui.drag_shift&&!strcmp(sms_ui.message,"draft")&&!dialog);
+  relay_wipe(&sms_ui,sizeof(sms_ui));relay_editor_clear();relay_view=RV_STATUS;page=MENU;
   free(frame.map);
   puts("Power, dark/multitouch rejection, MT-B cached/one-axis/repeated taps and loss-resync tests passed");
   return 0;
@@ -2265,7 +2418,15 @@ static void uplink_tests(struct drm_buf *b,const char *dir) {
 #include "devui/relay_tests.h"
 #include "devui/admin_tests.h"
 #include "devui/imei_tests.h"
+/* Compact IME keys are smaller than the standard 44px keyboard keys. */
+static void ime_press(struct drm_buf *b,const char *id) {
+  render(b);char selector[40];snprintf(selector,sizeof(selector),"#%s",id);
+  int x,y,w,h;assert(html_view_rect(selector,&x,&y,&w,&h));
+  assert(w>=30&&h>=34&&x>=0&&y>=0&&x+w<=W&&y+h<=H);
+  tap(x+w/2,y+h/2);
+}
 #include "devui/sms_tests.h"
+#include "devui/latency_tests.h"
 #include "devui/usblan_tests.h"
 #include "devui/wifi_tests.h"
 static void toolbox_tests(struct drm_buf *b, const char *dir) {
@@ -2694,6 +2855,7 @@ int main(int argc, char **argv) {
   wifi_tests(&b,argv[1]);
   imei_tests(&b,argv[1]);
   sms_tests(&b,argv[1]);
+  latency_tests(&b,argv[1]);
   free(b.map);
   return 0;
 }

@@ -832,7 +832,7 @@ export type ClashCoreAction =
   | { action: 'rollback' }
   | { action: 'geodata'; route?: ClashCoreRoute; mirror?: string }
 
-export type DevUIPageId = 'sms' | 'tailscale' | 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' | 'uplink' | 'profiles' | 'devices' | 'wifi' | 'signal' | 'usb' | 'power' | 'booster' | 'stock'
+export type DevUIPageId = 'latency' | 'sms' | 'tailscale' | 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' | 'uplink' | 'profiles' | 'devices' | 'wifi' | 'signal' | 'usb' | 'power' | 'booster' | 'stock'
 export interface DevUISettings {
   revision: number
   shortcut_enabled: boolean

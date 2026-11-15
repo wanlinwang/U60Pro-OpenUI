@@ -770,6 +770,8 @@ export const api = {
 
   // System
   top: () => get('/api/system/top').then((d) => d as unknown as ProcessListResult),
+  systemTimezone: () => get('/api/system/timezone'),
+  setSystemTimezone: (offset_minutes: number) => put('/api/system/timezone', { offset_minutes }),
   killBloat: () =>
     post('/api/system/kill-bloat', { all: true }, { 'X-Confirm': 'true' }).then(
       (d) => d as unknown as KillBloatResult,

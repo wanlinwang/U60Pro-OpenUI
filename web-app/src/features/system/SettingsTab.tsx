@@ -11,6 +11,7 @@ import { confirm, toast, toastError } from '../../ui/feedback'
 import { Card, Row } from '../../ui/primitives'
 import FirmwareLockSection from './FirmwareLockSection'
 import ServiceAccessSection from './ServiceAccessSection'
+import TimezoneSection from './TimezoneSection'
 
 // ── USB mode + powerbank ──────────────────────────────────────────────────────
 
@@ -280,6 +281,7 @@ export default function SettingsTab({ onLogout }: { onLogout: () => void }) {
 
       <UsbSection />
       <ServiceAccessSection />
+      <TimezoneSection />
       <FirmwareLockSection />
 
       <Card title={t('Service controls')}>

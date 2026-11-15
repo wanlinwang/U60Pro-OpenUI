@@ -18,7 +18,7 @@ pub const SYSTEM_CLOCK_OFFSET: i32 = 10_000;
 /// the old four features again keeps them.
 const MIGRATED: &str = "/data/local/tmp/openui-devui/menu-v2";
 /// Features the screen menu can show, in menu order, in a grid of up to 3x6 tiles.
-const MENU_ITEMS: [&str; 16] = [
+const MENU_ITEMS: [&str; 17] = [
     "overview",
     "proxy",
     "wireguard",
@@ -35,6 +35,7 @@ const MENU_ITEMS: [&str; 16] = [
     "profiles",
     "devices",
     "stock",
+    "latency",
 ];
 const DEFAULT_MENU: [&str; 4] = ["overview", "proxy", "wireguard", "clash"];
 /// The default before Proxy and Clash existed: every feature there was.
@@ -125,6 +126,7 @@ fn page_number(s: &str) -> u32 {
         "tailscale" => 14,
         "sms" => 15,
         "stock" => 16,
+        "latency" => 25,
         _ => 2,
     }
 }
@@ -169,7 +171,7 @@ impl Settings {
         let pages = self
             .menu_items
             .iter()
-            .filter(|item| item.as_str() != "stock")
+            .filter(|item| !matches!(item.as_str(), "stock" | "latency"))
             .map(|item| page_number(item).to_string())
             .collect::<Vec<_>>();
         if pages.is_empty() {
@@ -220,8 +222,12 @@ impl Settings {
             .menu_items
             .iter()
             .fold(0u32, |m, s| m | (1 << page_number(s)))
-            & !(1 << 16);
-        let home = page_number(&self.home_page);
+            & !((1 << 16) | (1 << 25));
+        let home = if self.home_page == "latency" {
+            2
+        } else {
+            page_number(&self.home_page)
+        };
         // K (space-delimited) extends F with SMS; old screens ignore it.
         let sms = if mask & (1 << 15) != 0 {
             format!(
@@ -359,14 +365,17 @@ fn apply_extras(mut s: Settings, journal: Option<&ExtraJournal>) -> Settings {
         }
     }
     if !s.menu_items.iter().any(|item| item == "stock") && s.menu_items.len() < 18 {
-        s.menu_items.insert(s.menu_items.len().min(3), "stock".into());
+        s.menu_items
+            .insert(s.menu_items.len().min(3), "stock".into());
     }
     s
 }
 /// The old file always remains readable by a pre-feature agent after rollback.
 fn legacy_settings(s: &Settings) -> Settings {
     let mut legacy = s.clone();
-    legacy.menu_items.retain(|item| item != "stock");
+    legacy
+        .menu_items
+        .retain(|item| item != "stock" && item != "latency");
     if legacy.menu_items.is_empty() {
         legacy.menu_items = DEFAULT_MENU.map(String::from).to_vec();
     }
@@ -852,6 +861,27 @@ mod tests {
 mod tailscale_settings_tests {
     use super::*;
     #[test]
+    fn latency_stays_out_of_legacy_files_and_records() {
+        let mut s = Settings::default();
+        s.menu_items = ["overview", "latency", "stock"].map(String::from).to_vec();
+        s.home_page = "latency".into();
+        assert!(s.validate().is_ok());
+        assert_eq!(s.menu_order_record(), "N 1 1 4\n");
+        let old = legacy_settings(&s);
+        assert_eq!(old.menu_items, ["overview"]);
+        assert_eq!(old.home_page, "menu");
+        for line in s.projection().lines() {
+            let fields: Vec<_> = line.split(' ').collect();
+            assert_ne!(fields[4], "25");
+            assert_eq!(fields[5].parse::<u32>().unwrap() & (1 << 25), 0);
+        }
+        assert!(s.screen_extras_record().contains("n 1 3 4 25 16\n"));
+        s.menu_items = vec!["latency".into()];
+        assert!(s.validate().is_ok());
+        assert_eq!(legacy_settings(&s).menu_items, DEFAULT_MENU);
+        assert!(s.projection().starts_with("C 1 120 128 2 27"));
+    }
+    #[test]
     fn menu_order_record_preserves_order_and_revision() {
         let mut settings = Settings::default();
         settings.revision = 8;
@@ -895,7 +925,7 @@ mod tailscale_settings_tests {
         assert_eq!(old.menu_items, DEFAULT_MENU.to_vec());
         s.home_page = "menu".into();
         s.menu_items = MENU_ITEMS.iter().map(|s| s.to_string()).collect();
-        assert_eq!(s.menu_items.len(), 16);
+        assert_eq!(s.menu_items.len(), 17);
         assert!(s.validate().is_ok());
     }
 }

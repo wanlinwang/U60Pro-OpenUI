@@ -346,6 +346,8 @@ pub fn route(
         (&Method::Get, "/api/cpu") => handlers::cpu(state),
         (&Method::Get, "/api/memory") => handlers::memory(state),
         (&Method::Get, "/api/system/top") => handlers::system_top(state),
+        (&Method::Get, "/api/system/timezone") => crate::timezone::get(),
+        (&Method::Put, "/api/system/timezone") => crate::timezone::update(body),
         (&Method::Get, "/api/screen/settings") => crate::screen_settings::get(),
         (&Method::Put, "/api/screen/settings") => crate::screen_settings::update(body),
         (&Method::Put, "/api/screen/language") => crate::screen_settings::set_language(body),

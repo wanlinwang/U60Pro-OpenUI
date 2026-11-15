@@ -14,6 +14,7 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'clash', title: N_('Clash'), description: N_('Status, proxy mode, nodes and delay tests, subscriptions, core and geo data') },
   { id: 'tailscale', title: N_('Tailscale'), description: N_('Status, connect / disconnect and online exit selection; enrollment is separate') },
   { id: 'sms', title: N_('SMS'), description: N_('Read and send text messages') },
+  { id: 'latency', title: N_('Latency'), description: N_('Test and reorder up to 24 Ping or Clash HTTPS targets') },
   { id: 'esim', title: N_('eSIM'), description: N_('Profiles on a removable eUICC: switch, or restart after a switch') },
   { id: 'uplink', title: N_('Wi-Fi relay'), description: N_('Upstream Wi-Fi status, signal and traffic, with on / off control') },
   { id: 'wifi', title: N_('Wi-Fi'), description: N_('2.4 GHz & 5 GHz radio switches, SSID and connected client count') },
@@ -25,12 +26,6 @@ const pages: { id: DevUIPageId; title: string; description: string }[] = [
   { id: 'devices', title: N_('Device routing'), description: N_('Choose which devices use WireGuard') },
   { id: 'stock', title: N_('Native theme'), description: N_('Return to the stock touchscreen') },
 ]
-const SYSTEM_CLOCK_OFFSET = 10000
-function offsetLabel(minutes: number) {
-  const sign = minutes < 0 ? '−' : '+'
-  const abs = Math.abs(minutes)
-  return `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
-}
 const GRID_PRESET: DevUIPageId[] = ['overview', 'proxy', 'wifi', 'signal', 'usb', 'power', 'booster', 'clash', 'esim']
 const CLASSIC_PRESET: DevUIPageId[] = ['overview', 'proxy', 'clash', 'esim']
 // i18n-ignore: each language is named in its own language
@@ -123,7 +118,6 @@ export default function DevUIPage() {
         <label className="block text-[13px] text-ink">{t('Brightness')} <span className="float-right font-mono">{Math.round(draft.brightness / 255 * 100)}%</span><input aria-label={t('DevUI brightness')} className="mt-3 w-full accent-accent" type="range" min="20" max="255" value={draft.brightness} disabled={busy} onChange={e => edit({ brightness: Number(e.target.value) })} /><span className="mt-1 block text-xs text-ink3">{t('Applied live; changing brightness does not wake a sleeping screen.')}</span></label>
         <label className="block text-[13px] text-ink">{t('Idle time')}<Select aria-label={t('DevUI idle timeout')} className="mt-2 w-full" value={draft.idle_seconds} disabled={busy} onChange={e => edit({ idle_seconds: Number(e.target.value) })}>{Array.from(new Set([30, 60, 120, 300, 600, draft.idle_seconds])).sort((a, b) => a - b).map(n => <option key={n} value={n}>{n < 60 ? t('{n} seconds', { n }) : n === 60 ? t('{n} minute', { n: 1 }) : t('{n} minutes', { n: n / 60 })}</option>)}</Select></label>
         <label className="block text-[13px] text-ink">{t('When idle')}<Select aria-label={t('DevUI idle action')} className="mt-2 w-full" value={draft.idle_sleep ? 'sleep' : 'stock'} disabled={busy} onChange={e => edit({ idle_sleep: e.target.value === 'sleep' })}><option value="sleep">{t('Turn the screen off, stay in DevUI')}</option><option value="stock">{t('Return to the stock UI')}</option></Select><span className="mt-2 block text-xs text-ink3">{draft.idle_sleep ? t('A short power press wakes the screen.') : t('Unsaved device routing choices are discarded on idle return.')}</span></label>
-        <label className="block text-[13px] text-ink">{t('Screen time zone')}<Select aria-label={t('Screen time zone')} className="mt-2 w-full" value={draft.clock_offset_minutes ?? SYSTEM_CLOCK_OFFSET} disabled={busy} onChange={e => edit({ clock_offset_minutes: Number(e.target.value) })}><option value={SYSTEM_CLOCK_OFFSET}>{t('Follow device time zone')}</option>{Array.from({ length: 105 }, (_, i) => i * 15 - 720).map(n => <option key={n} value={n}>{offsetLabel(n)}</option>)}</Select><span className="mt-1 block text-xs text-ink3">{t('Fixed offsets affect only the touchscreen clock.')}</span></label>
         <label className="block text-[13px] text-ink">{t('Startup page')}<Select aria-label={t('DevUI startup page')} className="mt-2 w-full" value={draft.home_page} disabled={busy} onChange={e => edit({ home_page: e.target.value as DevUISettings['home_page'] })}><option value="menu">{t('Main menu')}</option>{pages.filter(p => p.id !== 'stock' && draft.menu_items.includes(p.id)).map(p => <option key={p.id} value={p.id}>{t(p.title)}</option>)}</Select></label>
         <div className="block text-[13px] text-ink">{t('Screen language')}<span className="float-right">{LANGUAGES[draft.language ?? 'zh']}</span><span className="mt-2 block text-xs text-ink3">{t('Follows the language switch of this panel.')}</span></div>
       </div> : <p className="text-sm text-ink2">{t('Loading display preferences…')}</p>}

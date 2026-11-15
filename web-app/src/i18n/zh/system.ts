@@ -1,6 +1,13 @@
 import type { Dict } from '.'
 
 export default {
+  'System time zone': '系统时区',
+  'System time zone unavailable': '无法读取系统时区',
+  'The touchscreen clock and SMS use this time zone. Fixed UTC offsets do not adjust for daylight saving time.': '触摸屏时钟和短信使用此时区。固定 UTC 偏移不会自动调整夏令时。',
+  'Current custom time zone: {zone}': '当前自定义时区：{zone}',
+  'Timezone readback differs': '时区读取结果与设置不一致',
+  'System time zone updated': '系统时区已更新',
+  'Failed to update system time zone': '无法更新系统时区',
   // Group
   'System': '系统',
   'Health metrics, diagnostic tools and device controls': '运行监控、诊断工具与设备控制',

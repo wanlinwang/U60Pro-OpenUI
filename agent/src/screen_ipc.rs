@@ -15,6 +15,19 @@ pub const PAGE: usize = 4;
 #[derive(Debug, PartialEq)]
 pub enum Request {
     Status,
+    LatencyNames,
+    LatencyName { index: usize, target: String, name: String },
+    LatencyTargetsV3,
+    LatencySetV3 { index: usize, target: String },
+    LatencyMove { from: usize, to: usize },
+    LatencyResults,
+    LatencyTargets {
+        extended: bool,
+    },
+    LatencySet {
+        index: usize,
+        target: String,
+    },
     SmsClear,
     SmsChat3 {
         key: super::screen_sms::ThreadKey,
@@ -64,6 +77,7 @@ pub enum Power {
 /// Work done on the job thread, one at a time.
 #[derive(Debug, PartialEq)]
 pub enum Job {
+    Latency(Vec<String>),
     /// `toggle`, `profile` and `devices`: a WireGuard update. `toggle` never takes over
     /// from Clash; panels that know `backend` switch through it instead.
     SmsRefresh,
@@ -439,6 +453,78 @@ fn relay(words: &[&str]) -> Result<crate::wifi_uplink::RelayAction, &'static str
 /// Parses one line; every mutation carries the revision the panel displayed, except a
 /// subscription refresh (not revisioned) and node work (tied to the list generation).
 pub fn parse(line: &str) -> Result<Request, &'static str> {
+    if line.trim_end_matches('\n') == "latency names" { return Ok(Request::LatencyNames); }
+    if let Some(rest) = line.strip_prefix("latency name ") {
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        if fields.len() != 3 { return Err("Invalid latency name"); }
+        let index = fields[0].parse::<usize>().map_err(|_| "Invalid latency name")?;
+        if index >= super::screen_latency::ALL_TARGETS || !super::screen_latency::valid_target(fields[1]) { return Err("Invalid latency name"); }
+        let raw = fields[2];
+        if raw != "-" && (raw.len() > 144 || raw.len() % 2 != 0 || !raw.bytes().all(|b| b.is_ascii_hexdigit())) { return Err("Invalid latency name"); }
+        let bytes = if raw == "-" { Vec::new() } else { raw.as_bytes().chunks_exact(2).map(|c| u8::from_str_radix(std::str::from_utf8(c).unwrap_or(""), 16)).collect::<Result<Vec<_>, _>>().map_err(|_| "Invalid latency name")? };
+        let name = String::from_utf8(bytes).map_err(|_| "Invalid latency name")?;
+        if name.chars().any(char::is_control) { return Err("Invalid latency name"); }
+        return Ok(Request::LatencyName { index, target: fields[1].into(), name });
+    }
+    if line.trim_end_matches('\n') == "latency targets3" { return Ok(Request::LatencyTargetsV3); }
+    if let Some(rest) = line.strip_prefix("latency set3 ") {
+        let fields: Vec<&str> = rest.trim_end_matches('\n').split(' ').collect();
+        if fields.len() != 2 { return Err("Invalid latency target"); }
+        let index = fields[0].parse::<usize>().map_err(|_| "Invalid latency target")?;
+        let target = if fields[1] == "-" { "" } else { fields[1] };
+        if index >= super::screen_latency::ALL_TARGETS || (!target.is_empty() && !super::screen_latency::valid_target(target)) { return Err("Invalid latency target"); }
+        return Ok(Request::LatencySetV3 { index, target: target.into() });
+    }
+    if let Some(rest) = line.strip_prefix("latency move ") {
+        let fields: Vec<&str> = rest.trim_end_matches('\n').split(' ').collect();
+        if fields.len() != 2 { return Err("Invalid latency move"); }
+        let from = fields[0].parse::<usize>().map_err(|_| "Invalid latency move")?;
+        let to = fields[1].parse::<usize>().map_err(|_| "Invalid latency move")?;
+        if from >= super::screen_latency::ALL_TARGETS || to >= super::screen_latency::ALL_TARGETS { return Err("Invalid latency move"); }
+        return Ok(Request::LatencyMove { from, to });
+    }
+    if line == "latency targets\n" || line == "latency targets" {
+        return Ok(Request::LatencyTargets { extended: false });
+    }
+    if line == "latency targets2\n" || line == "latency targets2" {
+        return Ok(Request::LatencyTargets { extended: true });
+    }
+    if let Some(rest) = line.strip_prefix("latency set ") {
+        let rest = rest.strip_suffix('\n').unwrap_or(rest);
+        let fields: Vec<&str> = rest.split(' ').collect();
+        if fields.len() != 2 {
+            return Err("Invalid latency target");
+        }
+        let slot = fields[0]
+            .parse::<usize>()
+            .map_err(|_| "Invalid latency target")?;
+        let target = if fields[1] == "-" { "" } else { fields[1] };
+        if slot >= super::screen_latency::MAX_TARGETS
+            || (!target.is_empty() && !super::screen_latency::valid_target(target))
+        {
+            return Err("Invalid latency target");
+        }
+        return Ok(Request::LatencySet {
+            index: slot,
+            target: target.into(),
+        });
+    }
+    if line == "latency results\n" || line == "latency results" {
+        return Ok(Request::LatencyResults);
+    }
+    if let Some(rest) = line.strip_prefix("latency run ") {
+        let rest = rest.strip_suffix('\n').unwrap_or(rest);
+        let targets: Vec<String> = rest.split(' ').map(str::to_owned).collect();
+        if targets.is_empty()
+            || targets.len() > super::screen_latency::ALL_TARGETS
+            || !targets
+                .iter()
+                .all(|t| super::screen_latency::valid_target(t))
+        {
+            return Err("Invalid latency targets");
+        }
+        return Ok(Request::Job(Job::Latency(targets)));
+    }
     if line.trim_start().starts_with("uimei") {
         // read_line retains the frame delimiter. Remove exactly one LF, not
         // trim(): embedded newlines, CRLF and extra whitespace stay invalid.
@@ -554,10 +640,9 @@ pub fn parse(line: &str) -> Result<Request, &'static str> {
                         .map(|c| u8::from_str_radix(std::str::from_utf8(c).unwrap_or(""), 16))
                         .collect::<Result<_, _>>()
                         .map_err(|_| "Invalid SMS input")?;
-                    if bytes.iter().any(|b| !(32..=126).contains(b)) {
-                        return Err("Invalid SMS input");
-                    }
-                    String::from_utf8(bytes).map_err(|_| "Invalid SMS input")
+                    let value = String::from_utf8(bytes).map_err(|_| "Invalid SMS input")?;
+                    if value.chars().any(char::is_control) { return Err("Invalid SMS input"); }
+                    Ok(value)
                 };
                 let number = decode(number, 32)?;
                 if !number
@@ -1470,6 +1555,8 @@ mod tests {
         assert_eq!(parse("sms page 4"), Ok(Request::SmsPage { offset: 4 }));
         let send = parse("sms send 2b313233 48692021\n").unwrap();
         assert!(format!("{send:?}").contains("redacted"));
+        assert!(matches!(parse("sms send 3132 e4bda0e5a5bd"), Ok(Request::Job(Job::SmsSend(_)))));
+        assert!(parse("sms send 3132 e4bda00a").is_err());
         assert!(!format!("{send:?}").contains("123"));
         for invalid in [
             "sms send 616263 41",

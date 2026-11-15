@@ -198,7 +198,7 @@ static void status_charge_bolt(int x,int y) {
 static void status_clock(char clock[8],time_t now,int offset) {
   struct tm local,*result=NULL;snprintf(clock,8,"--:--");
   if(now>=1577836800) {
-    if(offset==10000)result=localtime_r(&now,&local);
+    if(offset==10000){screen_system_timezone();result=localtime_r(&now,&local);}
     else {now+=(time_t)offset*60;result=gmtime_r(&now,&local);}
     if(result)strftime(clock,8,"%H:%M",result);
   }
@@ -212,7 +212,7 @@ static const char *status_radio(const char *radio,int has_sim) {
   return "--";
 }
 static void top_status(void) {
-  char clock[8];status_clock(clock,time(NULL),settings_clock_offset);
+  char clock[8];status_clock(clock,time(NULL),10000);
   rect(0,0,W,40,"","#000000");
   add("<div class=\"box head status-text\" style=\"left:10px;top:7px;width:72px;height:24px;font-size:18px;line-height:24px;color:#ffffff\">");
   escaped(clock);add("</div>");
@@ -311,6 +311,7 @@ static void dialog_card(int y, int h) {
 #include "pages.h"
 #include "imei_pages.h"
 #include "sms_pages.h"
+#include "latency_pages.h"
 /* Main menu features: their names (shorter on a tile), marks, row details and the word
  * or two a tile shows. */
 static const char *menu_title(int p, int tile) {
@@ -322,6 +323,7 @@ static const char *menu_title(int p, int tile) {
   case CLASH: return "Clash";
   case TAILSCALE: return "Tailscale";
   case SMS_PAGE: return L("SMS","短信");
+  case LATENCY_PAGE: return L("Latency","测延时");
   case ESIM: return "eSIM";
   case UPLINK: return L("Wi-Fi relay","无线中继");
   case WIFI_PAGE: return "Wi-Fi";
@@ -342,6 +344,7 @@ static const char *menu_icon(int p) {
   case CLASH: return "&#10022;";        /* ✦ */
   case TAILSCALE: return "&#8644;";
   case SMS_PAGE: return "&#9993;";
+  case LATENCY_PAGE: return "&#9201;";
   case ESIM: return "&#9635;";          /* ▣ */
   case UPLINK: return "&#8673;";        /* ⇡ */
   case WIFI_PAGE: return "&#8779;";     /* ≋ */
@@ -363,6 +366,7 @@ static const char *menu_detail(int p) {
   case CLASH: return L("Nodes, subscriptions and core","节点、订阅与内核");
   case TAILSCALE: return ts_summary();
   case SMS_PAGE: return L("Read and send messages","查看和发送短信");
+  case LATENCY_PAGE: return L("ICMP latency to saved targets","测试目标 Ping 延时");
   case ESIM: return esim_summary();
   case UPLINK: return uplink_summary();
   case WIFI_PAGE: return L("Bands and connected clients","频段开关与在线终端");
@@ -390,6 +394,7 @@ static void tile_state(int p, char *buf, size_t n, const char **cls) {
     if(!ts_blocked()&&!pending&&!data.busy&&!data.tailscale.error&&!strcmp(data.tailscale.state,"Running")&&data.tailscale.has_online&&data.tailscale.online)*cls="good";
     snprintf(buf,n,"%s",ts_summary()); return;
   case SMS_PAGE: snprintf(buf,n,"%s",L("Messages","短信")); return;
+  case LATENCY_PAGE: snprintf(buf,n,"%s",L("Ping","Ping")); return;
   case ESIM:
     if(data.esim.has&&!strcmp(data.esim.card,"euicc"))snprintf(buf,n,"%s",esim_summary());
     else snprintf(buf,n,"%s",data.esim.has&&!strcmp(data.esim.card,"sim")?L("SIM card","普通 SIM"):"--");
@@ -431,8 +436,8 @@ static void menu_rate(char *out,size_t n,unsigned long long kbps) {
   else snprintf(out,n,"%lluK",kbps);
 }
 /* The saved order is shared by the dashboard shortcuts and the complete grid. */
-static const int menu_pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,SMS_PAGE,PROFILES,DEVICES,STOCK_MENU};
-static const char *const menu_ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","sms","profiles","devices","stock"};
+static const int menu_pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,SMS_PAGE,PROFILES,DEVICES,LATENCY_PAGE,STOCK_MENU};
+static const char *const menu_ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","sms","profiles","devices","latency","stock"};
 #define MENU_COUNT ((int)(sizeof(menu_pages)/sizeof(menu_pages[0])))
 static int ordered_menu(int *indices) {
   int count=0;
@@ -667,6 +672,7 @@ static void build_html(void) {
   else if(page==CFOPT) render_cfopt();
   else if(page==TAILSCALE) render_tailscale();
   else if(page==SMS_PAGE) render_sms();
+  else if(page==LATENCY_PAGE) render_latency();
   else if(page==ESIM) render_esim();
   else if(page==UPLINK) render_uplink();
   else if(page==WIFI_PAGE) render_wifi();
@@ -688,7 +694,7 @@ static struct {
 /* Non-secret work counters for preview tests and the native synthetic benchmark. */
 static unsigned long long relay_keyboard_scaffold_draws,relay_keyboard_dynamic_draws;
 static int relay_keyboard_active(void) {
-  return (page==UPLINK||page==SMS_PAGE)&&relay_view==RV_KEYBOARD&&relay_edit.active&&!dialog;
+  return (page==UPLINK||page==SMS_PAGE||page==LATENCY_PAGE)&&relay_view==RV_KEYBOARD&&relay_edit.active&&!dialog;
 }
 static int relay_keyboard_same_scaffold(void) {
   return relay_keyboard_cache.valid&&relay_keyboard_cache.epoch==relay_key_epoch&&

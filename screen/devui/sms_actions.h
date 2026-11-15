@@ -51,14 +51,49 @@ static int sms_reply_number(void) {
   return 1;
 }
 static void sms_return_thread(void) {sms_ui.view=SMS_THREAD;sms_fetch();}
+/* Follow a finger within the visible batch. Pull past an edge to load the
+   neighbouring batch on release; no SMS request is made during motion. */
+static void sms_drag_redraw(void) {relay_keyboard_cache.valid=0;need_draw=1;}
+static void sms_drag_cancel(int startpan) {
+  if(sms_ui.pan!=startpan||sms_ui.drag_shift){sms_ui.pan=startpan;sms_ui.drag_shift=0;sms_drag_redraw();}
+}
+static void sms_drag_update(int view,int startpan,int dy) {
+  int pan=startpan,shift=0;
+  if(view==SMS_LIST) {
+    if((dy>0&&sms_ui.offset>0)||(dy<0&&sms_ui.offset+sms_ui.n<sms_ui.total))shift=dy;
+  } else if(view==SMS_THREAD) {
+    int max=sms_chat_max_pan(),raw=startpan+dy;pan=raw<0?0:raw>max?max:raw;
+    int extra=raw-pan;
+    if((extra>0&&sms_ui.thread_offset+1<sms_ui.total)||(extra<0&&sms_ui.thread_offset>0))shift=extra;
+  }
+  if(shift>64)shift=64;if(shift< -64)shift= -64;
+  if(sms_ui.pan!=pan||sms_ui.drag_shift!=shift){sms_ui.pan=pan;sms_ui.drag_shift=shift;sms_drag_redraw();}
+}
+static void sms_drag_finish(int view) {
+  int shift=sms_ui.drag_shift;sms_ui.drag_shift=0;
+  if(view==SMS_LIST) {
+    if(shift<= -36&&sms_ui.offset+sms_ui.n<sms_ui.total){sms_ui.offset+=4;sms_fetch();}
+    else if(shift>=36&&sms_ui.offset>0){sms_ui.offset=sms_ui.offset>=4?sms_ui.offset-4:0;sms_fetch();}
+  } else if(view==SMS_THREAD) {
+    if(shift>=36&&sms_ui.thread_offset+1<sms_ui.total){sms_ui.thread_offset++;sms_fetch();sms_ui.pan=0;}
+    else if(shift<= -36&&sms_ui.thread_offset>0){sms_ui.thread_offset--;sms_fetch();sms_ui.pan=sms_chat_max_pan();}
+  }
+  sms_drag_redraw();
+}
+static int sms_inline_key(const char *action) {
+  int result=relay_keyboard_tap(action);
+  if(relay_view!=RV_KEYBOARD&&sms_ui.pan>sms_chat_max_pan())sms_ui.pan=sms_chat_max_pan();
+  return result;
+}
 static int sms_tap(const char *a) {
   if(page!=SMS_PAGE)return 0;
   if(relay_view==RV_KEYBOARD) {
     if(sms_ui.view!=SMS_THREAD)return relay_keyboard_tap(a);
-    if(!strcmp(a,"back"))return relay_keyboard_tap("rkdone");
-    if(strcmp(a,"sms_reply_send"))return relay_keyboard_tap(a);
-    if(!sms_reply_number()||!sms_ui.message[0]||blocked())return 1;
-    relay_keyboard_tap("rkdone");
+    if(!strcmp(a,"back"))return sms_inline_key("rkdone");
+    if(strcmp(a,"sms_reply_send"))return sms_inline_key(a);
+    if(!sms_reply_number()||blocked())return 1;
+    if(!relay_ime_raw()||!sms_ui.message[0])return 1;
+    sms_inline_key("rkdone");
   }
   if(!strcmp(a,"back")) {
     if(sms_ui.view==SMS_DETAIL){sms_ui.view=SMS_THREAD;sms_ui.text_offset=0;}
@@ -69,17 +104,17 @@ static int sms_tap(const char *a) {
   }
   if(sms_ui.view==SMS_LIST) {
     if(!strcmp(a,"sms_refresh")&&!blocked())send_job("sms refresh\n",JOB_SMS_LIST,0);
-    else if(!strcmp(a,"sms_prev")&&sms_ui.offset>0){sms_ui.offset-=4;sms_fetch();}
-    else if(!strcmp(a,"sms_next")&&sms_ui.offset+sms_ui.n<sms_ui.total){sms_ui.offset+=4;sms_fetch();}
+    else if(!strcmp(a,"sms_prev")&&sms_ui.offset>0){sms_ui.offset-=4;sms_ui.drag_shift=0;sms_fetch();}
+    else if(!strcmp(a,"sms_next")&&sms_ui.offset+sms_ui.n<sms_ui.total){sms_ui.offset+=4;sms_ui.drag_shift=0;sms_fetch();}
     else if(!strcmp(a,"sms_new")&&!blocked()){sms_ui.from_thread=0;sms_ui.view=SMS_COMPOSE;relay_edit.active=1;}
     else if(!strncmp(a,"sms_row",7)&&a[7]>='0'&&a[7]<='3'&&!a[8]&&a[7]-'0'<sms_ui.n){
       int i=a[7]-'0';snprintf(sms_ui.thread_key,sizeof(sms_ui.thread_key),"%s",sms_ui.rows[i].key);
       snprintf(sms_ui.thread_number,sizeof(sms_ui.thread_number),"%s",sms_ui.rows[i].number);
-      relay_wipe(sms_ui.message,sizeof(sms_ui.message));sms_ui.thread_offset=0;relay_edit.active=1;sms_return_thread();
+      relay_wipe(sms_ui.message,sizeof(sms_ui.message));sms_ui.thread_offset=0;sms_ui.pan=sms_ui.drag_shift=0;relay_edit.active=1;sms_return_thread();
     }
   } else if(sms_ui.view==SMS_THREAD) {
-    if(!strcmp(a,"sms_older")&&sms_ui.thread_offset+1<sms_ui.total){sms_ui.thread_offset++;sms_fetch();}
-    else if(!strcmp(a,"sms_newer")&&sms_ui.thread_offset>0){sms_ui.thread_offset--;sms_fetch();}
+    if(!strcmp(a,"sms_older")&&sms_ui.thread_offset+1<sms_ui.total){sms_ui.thread_offset++;sms_fetch();sms_ui.pan=0;}
+    else if(!strcmp(a,"sms_newer")&&sms_ui.thread_offset>0){sms_ui.thread_offset--;sms_fetch();sms_ui.pan=sms_chat_max_pan();}
     else if(!strcmp(a,"sms_thread_refresh")&&!blocked())send_job("sms refresh\n",JOB_SMS_LIST,0);
     else if(!strcmp(a,"sms_reply")&&sms_reply_number()&&!blocked())relay_key_open(RK_SMS_BODY);
     else if(!strcmp(a,"sms_reply_send")&&sms_reply_number()&&sms_ui.message[0]&&!blocked()){

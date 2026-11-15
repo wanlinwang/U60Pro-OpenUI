@@ -42,6 +42,7 @@ mod site_route;
 mod sms;
 mod storage;
 mod system;
+mod timezone;
 mod tailscale;
 mod transition;
 mod ubus;
@@ -107,6 +108,7 @@ fn main() {
 
     // Before Tailscale: a clock stuck in the past after a battery-less reboot breaks its
     // TLS sign-in. Syncs the system clock in the background, for everything, not just this.
+    timezone::start();
     clock_sync::start();
     tailscale::start();
     wireguard::start();

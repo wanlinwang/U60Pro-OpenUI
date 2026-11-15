@@ -38,6 +38,7 @@ static void go(int p) {
   if(p!=IMEI_PAGE) {imei_clear();if(page==IMEI_PAGE){relay_wipe(html,sizeof(html));relay_wipe(drawn_html,sizeof(drawn_html));drawn_valid=0;}}
   page=p;notice[0]=0;need_draw=1;
   if(p==SMS_PAGE){relay_wipe(&sms_ui,sizeof(sms_ui));sms_ui.view=SMS_LIST;relay_view=RV_STATUS;if(!blocked())send_job("sms refresh\n",JOB_SMS_LIST,0);}
+  if(p==LATENCY_PAGE){relay_view=RV_STATUS;latency_ui.scroll=0;latency_ui.sorted=0;latency_ui.moving=-1;(void)latency_fetch_targets();}
   if(p==USB_PAGE){usb_draft=-1;ttl_draft=-1;}
   if(p==WIFI_PAGE){wifi_view=0;wifi_offset=0;}
   if(p==NODES)fetch_groups();
@@ -164,6 +165,7 @@ static void tap(int x,int y) {
   if(imei_tap(a))return;
   if(!strcmp(a,"imei")&&page==SIGNAL_PAGE){go(IMEI_PAGE);return;}
   if(sms_tap(a))return;
+  if(latency_tap(a))return;
   if(relay_tap(a))return;
   /* The Wi-Fi page's device lists step back to the list above them, not the menu. */
   if(page==WIFI_PAGE&&wifi_view&&!strcmp(a,"back")) { wifi_view=wifi_view==2?1:0;wifi_offset=0;return; }
@@ -172,7 +174,7 @@ static void tap(int x,int y) {
   if(page==DASHBOARD||page==MENU)menu_origin=page;
   static const struct { const char *id; int page; } links[]={
     {"wireguard",WG},{"overview",OVERVIEW},{"profiles",PROFILES},{"proxy",PROXY},
-    {"clash",CLASH},{"sms",SMS_PAGE},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"cfopt",CFOPT},{"esim",ESIM},
+    {"clash",CLASH},{"sms",SMS_PAGE},{"latency",LATENCY_PAGE},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"cfopt",CFOPT},{"esim",ESIM},
     {"wifi",WIFI_PAGE},{"signal",SIGNAL_PAGE},{"usb",USB_PAGE},{"power",POWER_PAGE},{"booster",BOOSTER_PAGE}};
   for(size_t i=0;i<sizeof(links)/sizeof(links[0]);i++)
     if(!strcmp(a,links[i].id)) { if(reachable(links[i].page)){group_offset=0;go(links[i].page);} return; }

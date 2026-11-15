@@ -104,7 +104,7 @@ modify factory menus, binaries, boot scripts, power-off or hardware-reset behavi
 | Idle time | 30–600 seconds; default 120 seconds, measured from touch or a short power press |
 | When idle | Turn the screen off and stay in DevUI (default), or return to the stock UI |
 | Startup page | Main menu or any visible feature; applies on the next opening |
-| Menu features | Up to 18 tiles in three columns and six rows; the 15 available features include Overview, Proxy, WireGuard, Clash, Tailscale, SMS, eSIM and the other device controls. The default is Overview, Proxy, WireGuard and Clash. |
+| Menu features | Up to 18 tiles in three columns and six rows; features include Overview, Proxy, WireGuard, Clash, Tailscale, SMS, Latency, eSIM and the other device controls. The default is Overview, Proxy, WireGuard and Clash. |
 
 In **DevUI → Menu features**, drag one tile between the display and candidate areas,
 or drag within the display area to change its position. The + and − controls also
@@ -133,11 +133,23 @@ checks reject stale saves from another browser session; **Reload settings**
 reloads the device's saved version. Settings contain no passwords, VPN keys, HTML,
 scripts or shell commands.
 
+## Latency on the device screen
+
+Add **Latency** in **DevUI → Menu features**, arrange it and save. The screen saves up to 24 targets. Drag the list with one finger to browse it; the up/down buttons provide an alternative. One **Add target** row follows the saved targets until the list is full. Tap a saved target to edit its display name or address; clear the address to remove it. Names are optional, support Chinese and English (up to 72 UTF-8 bytes), stay attached to the target when sorting, and do not replace the tested address. **Test all** measures every saved target, with at most six probes running concurrently. To reorder, tap **Sort**, select a target, scroll if needed, and tap the destination row. Tap **Done** to finish. The target is inserted at the chosen position and the intervening rows shift. Targets and order survive reopening and reboot. Inputs are ASCII and at most 64 characters. A plain hostname or IP gets a bounded network probe. Prefix a hostname or IP with `https://` (for example, `https://google.com`) to measure HTTPS time to first response through the running Clash mixed proxy; URL paths, ports and credentials are not supported. The screen labels the measurement Ping, TS or HTTPS.
+
+Existing four- and six-target files retain their format. Additional targets and the order are stored separately. Older software continues to read its original physical slots, but does not display additional targets or apply the new ordering; newer software reads those older slots again after an upgrade.
+
+Ping originates on the router and follows its actual IP route. For a Tailscale IPv4 peer (100.64.0.0/10) or `.ts.net` name, the panel first tries Tailscale's own probe and marks a known direct or relay path; if that probe is unavailable, it falls back to ordinary Ping. Other subnet addresses use ordinary Ping, so a subnet router's response is not mistaken for the downstream device. Tailscale's probe tests the peer's Tailscale layer, not its operating-system firewall. ICMP may be filtered and a missing reply does not prove a website is unavailable. HTTPS explicitly uses Clash's existing rule decisions and reports unavailable when Clash is not running; it is a first-response measurement, not ICMP round-trip time. The feature does not change proxy or routing settings. Targets are kept in a private device file, not in the source tree or the legacy menu settings.
+
 ## SMS on the device screen
 
-Enable **SMS** in **DevUI → Menu features**, arrange it as desired and save the settings. The screen groups up to 500 recent messages into conversations by sender or recipient. Open a conversation to read received messages in left-aligned bubbles and sent messages in right-aligned bubbles; tap the input at the bottom to type a reply with the keyboard on the same screen, then tap Send to review it. Hide the keyboard to see more messages. Use Earlier and Later to move through the conversation, including consecutive parts of long messages, and Refresh to load new messages. Received Chinese text is supported; unusually long message bodies are shortened with an ellipsis. Common formatting separators in phone numbers are ignored for grouping, but country codes are not guessed. Senders that are not valid phone numbers remain read-only. Tap **New SMS**, enter the recipient and message using the on-screen English, numeric and symbol keyboard, review both, then confirm sending. The current keyboard does not support entering Chinese. Sending uses the device SIM and may incur carrier charges. If a send result is unknown, check sent messages before retrying. This feature does not delete messages or mark them as read.
+Enable **SMS** in **DevUI → Menu features**, arrange it as desired and save the settings. The screen groups up to 500 recent messages into conversations by sender or recipient. Open a conversation to read received messages in left-aligned bubbles and sent messages in right-aligned bubbles; tap the input at the bottom to type a reply with the keyboard on the same screen, then tap Send to review it. Hide the keyboard to see more messages. Use Earlier and Later to move through the conversation, including consecutive parts of long messages, and Refresh to load new messages. Received Chinese text is supported; unusually long message bodies are shortened with an ellipsis. Common formatting separators in phone numbers are ignored for grouping, but country codes are not guessed. Senders that are not valid phone numbers remain read-only. Tap **New SMS**, enter the recipient and message with the on-screen keyboard, review both, then confirm sending. The Chinese/English switch enables an offline, single-character Pinyin keyboard: type a syllable without tones, select a candidate, and use the arrows for more candidates. Use `v` for `ü` (for example, `nv` for 女). The message field holds up to 160 UTF-8 bytes (up to 53 three-byte Chinese characters); the same keyboard also supports English, numbers and symbols. Sending uses the device SIM and may incur carrier charges. If a send result is unknown, check sent messages before retrying. This feature does not delete messages or mark them as read.
 
 SMS data is read on demand over the screen's root-only local socket and is not included in the ordinary status records. The screen clears its view when leaving the page. Viewing messages on the physical screen is accessible to anyone who can open DevUI; the stock lock screen does not protect it.
+
+Drag the conversation list or message area with one finger. Pull past the edge and release to load the previous or next batch; the buttons remain available. With the keyboard open, drag the conversation above it to reveal the rest of the current batch without changing the draft.
+
+Recognized WMS and ISO message timestamps are shown as `YYYY-MM-DD HH:MM` in the device system timezone when a source timezone is provided. The screen interprets semicolon-delimited WMS offsets as hours, consistent with the agent's send format, and comma-delimited SMS offsets as quarter-hours, consistent with the [3GPP SMS timestamp convention](https://www.etsi.org/deliver/etsi_ts/123000_123099/123040/18.00.00_60/ts_123040v180000p.pdf). Timestamps without an offset keep their original clock values, and invalid or unrecognized dates retain their original text. This affects display only; stored messages are unchanged.
 
 ## Screen pages
 
@@ -288,12 +300,13 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   before this field existed load as Chinese.
   The legacy settings remain in `/data/local/tmp/openui-devui/settings.json`;
   the separately versioned `menu-extras.json` holds the native-theme card's
-  placement and the touchscreen clock's optional fixed UTC offset. A two-version
+  placement and the previous screen-only UTC offset for backward compatibility. A two-version
   journal retains the matching settings if either file update is interrupted.
   Both are written with mode 0600 in a 0700 directory; older agents can still read
-  the legacy file after rollback. The screen clock follows the device timezone by
-  default; a fixed offset affects only display, not the system clock, and does not
-  automatically follow daylight-saving changes.
+  the legacy file after rollback. The screen clock and SMS timestamps follow the
+  device system timezone. Change it in **System → Settings → System time zone**;
+  fixed UTC offsets do not automatically follow daylight-saving changes. Applying
+  an offset persists it in OpenWrt system settings without changing the clock instant.
 - Private `/tmp/openui-screen/control.sock`: mode 0600, parent directory 0700.
   The screen receives redacted `S`, `P`, `D`, `O`, `C` and `J` records. `C` contains
   the DevUI revision, timeout, brightness, startup page, visible-page bitmask and
