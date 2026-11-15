@@ -98,7 +98,7 @@ export default function MenuGrid({ pages, items, disabled, onChange }: {
       <div className="max-w-[320px] rounded-2xl bg-[#0b0d11] p-3 text-[#e8eaee]">
         <div aria-hidden="true" className="mb-2 flex items-center justify-between text-xs font-semibold"><span>12:34</span><span>▂▄▆ 5G ▰</span></div>
         <div className="mb-2 rounded-lg border border-[#292d34] bg-[#191c21] px-3 py-2 text-xs text-[#9aa1ac]">{t('Mobile network')} · ↓ ↑</div>
-        <div className="grid grid-cols-2 gap-1">{Array.from({ length: 4 }, (_, i) => <div key={i} className="flex h-12 items-center justify-center rounded-lg border border-[#30343a] bg-[#202329] px-2 text-center text-sm font-semibold">{displayed[i] ? tileTitle(displayed[i]) : '—'}</div>)}</div>
+        <div data-menu-zone="display" className="grid grid-cols-2 gap-1">{Array.from({ length: 4 }, (_, i) => cell(displayed[i], 'display', i))}</div>
         <div className="mt-2 rounded-lg border border-[#30343a] bg-[#202329] py-2 text-center text-sm font-semibold">▦ {t('More')}</div>
       </div>
     </section>
