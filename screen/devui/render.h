@@ -176,11 +176,14 @@ static void header_battery(int x,int y) {
 }
 /* Small stepped curves, so Wi-Fi resembles the reference at 320 x 480. */
 static void status_wifi(int x,int y,int active) {
-  const char *arc=active?"#808080":"#3a414b",*dot_color=active?"#ffffff":"#3a414b";
-  rect(x+5,y,10,2,"",arc);rect(x+3,y+2,4,2,"",arc);rect(x+13,y+2,4,2,"",arc);
-  rect(x+1,y+4,5,2,"",arc);rect(x+16,y+4,5,2,"",arc);
-  rect(x+6,y+5,8,2,"",arc);rect(x+4,y+7,4,2,"",arc);rect(x+12,y+7,4,2,"",arc);
-  rect(x+9,y+13,2,1,"",dot_color);rect(x+8,y+14,4,2,"",dot_color);
+  const char *c=active?"#e8eaee":"#3a414b";
+  /* Symmetric, separated arcs keep the silhouette legible at this size. */
+  rect(x+6,y,9,2,"",c);rect(x+3,y+1,3,2,"",c);rect(x+15,y+1,3,2,"",c);
+  rect(x+1,y+3,3,2,"",c);rect(x+17,y+3,3,2,"",c);
+  rect(x,y+5,2,2,"",c);rect(x+19,y+5,2,2,"",c);
+  rect(x+7,y+5,7,2,"",c);rect(x+5,y+6,2,2,"",c);rect(x+14,y+6,2,2,"",c);
+  rect(x+4,y+8,2,2,"",c);rect(x+15,y+8,2,2,"",c);
+  rect(x+9,y+12,3,3,"",c);
 }
 static void status_charge_bolt(int x,int y) {
   add("<div id=\"charging-bolt\" class=\"box\" style=\"left:%dpx;top:%dpx;width:10px;height:15px\">",x,y);
