@@ -16,6 +16,10 @@ and FONT-COPYING. No system/vendor fonts are bundled.
 Source: https://unifoundry.com/unifont/index.html
 Pinned font download and reproducible build: devui/build.py.
 
+The status bar also embeds Roboto, Copyright 2011 The Roboto Project Authors
+(https://github.com/googlefonts/roboto-classic), under the SIL Open Font License
+1.1 in FONT-LICENSE. Its source and checksum are pinned in devui/build.py.
+
 Fork packaging and modifications: Copyright (c) 2026 ZweiChen.
 GPL-3.0-or-later.
 

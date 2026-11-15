@@ -68,6 +68,7 @@ struct snapshot {
   int np, battery, temperature, charging; /* charging: 1 charging, 2 full, 0 not (or an older agent) */
   unsigned long long settings_rev;
   int idle_seconds, brightness, home_page, menu_mask, zh, idle_sleep;
+  int native_menu_record, clock_offset_minutes;
   int menu_order[18], menu_order_count;
   unsigned long long uptime;
   double memory, cpu;
@@ -101,7 +102,7 @@ static int screen_awake = 1;
 #endif
 /* Menu features first (their numbers are the settings record's page bits), then pages
  * reached from them. */
-enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_PAGE, SIGNAL_PAGE, USB_PAGE, POWER_PAGE, BOOSTER_PAGE, TAILSCALE, SMS_PAGE, NODES, GROUP, SUBS, CORE, DIAG, CFOPT, IMEI_PAGE };
+enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_PAGE, SIGNAL_PAGE, USB_PAGE, POWER_PAGE, BOOSTER_PAGE, TAILSCALE, SMS_PAGE, STOCK_MENU, NODES, GROUP, SUBS, CORE, DIAG, CFOPT, IMEI_PAGE, DASHBOARD };
 #define LEGACY_PAGES 27  /* features of a C record: WireGuard, devices, profiles, overview */
 #define MENU_PAGES 123   /* features of a V record: the above plus proxy and Clash */
 #define ESIM_MENU_PAGES 251 /* features of a W record: the above plus eSIM */
@@ -111,6 +112,9 @@ enum { WG, DEVICES, MENU, PROFILES, OVERVIEW, PROXY, CLASH, ESIM, UPLINK, WIFI_P
 #define TOOLBOX_MENU_PAGES 16379 /* features of a Z record: the above plus Pocket OS toolbox pages */
 static int page = MENU, offset, dialog, dirty, quitting, need_draw = 1,
                                                   return_after_save;
+/* The settings protocol's MENU remains the feature grid. DASHBOARD is a local
+ * view only, so existing saved page IDs and masks remain compatible. */
+static int menu_origin = MENU;
 static unsigned long long settings_revision;
 /* Until the first record: overview, proxy, WireGuard and Clash. */
 static int settings_idle = 120, settings_brightness = 128, settings_home = MENU, settings_menu = 113;
@@ -118,11 +122,16 @@ static int settings_idle = 120, settings_brightness = 128, settings_home = MENU,
 static int settings_zh = 1;
 /* An absent or invalid ordering record keeps the original menu order. */
 static int settings_order[18], settings_order_count;
+/* Older agents have no native-theme item; include it at the end for safety. */
+static int settings_native_menu, settings_clock_offset = 10000;
 /* Idle action from the W record: 1 turns the screen off and stays in DevUI, 0 returns to
  * the stock UI (also with older agents, whose W records end at the language). */
 static int settings_sleep = 0;
 #define L(en, zh) (settings_zh ? (zh) : (en))
-static int visible_page(int p) { return p == MENU || (p <= SMS_PAGE && (settings_menu & (1 << p))); }
+static int visible_page(int p) {
+  if(p==STOCK_MENU)return !settings_native_menu || (settings_menu & (1 << STOCK_MENU));
+  return p == MENU || p == DASHBOARD || (p >= 0 && p <= SMS_PAGE && (settings_menu & (1 << p)));
+}
 /* Saved profiles and device routing belong to WireGuard; node, subscription and core
  * pages to Clash; diagnostics to Clash and Proxy; the Wi-Fi uplink also to Overview,
  * which shows it when the agent reports one. */
@@ -145,6 +154,7 @@ static int update_settings(const struct snapshot *s) {
   settings_home = s->home_page; settings_menu = s->menu_mask; settings_zh = s->zh;
   settings_sleep = s->idle_sleep;
   settings_order_count = s->menu_order_count;
+  settings_native_menu = s->native_menu_record; settings_clock_offset = s->native_menu_record ? s->clock_offset_minutes : 10000;
   memcpy(settings_order, s->menu_order, sizeof(settings_order));
   return result;
 }
@@ -273,16 +283,16 @@ static void rotate_frame(struct drm_buf *b) {
 }
 /* N is optional. Reject malformed, repeated or partial orderings; the main settings
  * record remains usable and older agents/screens keep their original menu order. */
-static int parse_menu_order(const char *line, unsigned long long *revision, int *pages, int *count, int *mask) {
+static int parse_menu_order(const char *line, unsigned long long *revision, int *pages, int *count, int *mask, int extended) {
   int n = 0, pos = 0, bits = 0;
-  if (sscanf(line, "N %llu %d %n", revision, &n, &pos) != 2 || n < 1 || n > 18 || !pos) return 0;
-  const char *cursor = line + pos;
+  if (sscanf(line+1, " %llu %d %n", revision, &n, &pos) != 2 || n < 1 || n > 18 || !pos) return 0;
+  const char *cursor = line + 1 + pos;
   for (int i = 0; i < n; i++) {
     while (*cursor == ' ') cursor++;
     if (*cursor < '0' || *cursor > '9') return 0;
     char *end;
     long value = strtol(cursor, &end, 10);
-    if ((*end && *end != ' ') || value < 0 || value > SMS_PAGE || value == MENU || (bits & (1 << value))) return 0;
+    if ((*end && *end != ' ') || value < 0 || value > (extended?STOCK_MENU:SMS_PAGE) || value == MENU || (bits & (1 << value))) return 0;
     pages[i] = (int)value; bits |= 1 << value; cursor = end;
   }
   while (*cursor == ' ') cursor++;
@@ -291,11 +301,15 @@ static int parse_menu_order(const char *line, unsigned long long *revision, int 
   return 1;
 }
 static int parse_snapshot(char *buf, struct snapshot *out) {
-  struct snapshot s = {.battery = -1, .temperature = -999, .memory = -1};
+  struct snapshot s = {.battery = -1, .temperature = -999, .memory = -1, .clock_offset_minutes = 10000};
   char *save, *line = strtok_r(buf, "\n", &save);
   int imei_seen = 0, imei_bad = 0;
   int order_seen = 0, order_ok = 0, order_count = 0, order_mask = 0, order_pages[18] = {0};
   unsigned long long order_rev = 0;
+  int x_seen=0,x_ok=0,x_idle=0,x_level=0,x_home=0,x_mask=0,x_sleep=0,x_clock=10000;
+  unsigned long long x_rev=0,x_order_rev=0;
+  int x_order_seen=0,x_order_ok=0,x_order_count=0,x_order_mask=0,x_order_pages[18]={0};
+  char x_lang[4]="zh";
   int valid = 0, v_ok = 0, v_idle = 0, v_level = 0, v_home = 0, v_mask = 0;
   int w_ok = 0, w_idle = 0, w_level = 0, w_home = 0, w_mask = 0, w_sleep = 0;
   int y_ok = 0, y_idle = 0, y_level = 0, y_home = 0, y_mask = 0, y_sleep = 0;
@@ -322,7 +336,22 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     }
     else if (line[0] == 'N' && line[1] == ' ') {
       if (order_seen++) order_ok = 0;
-      else order_ok = parse_menu_order(line, &order_rev, order_pages, &order_count, &order_mask);
+      else order_ok = parse_menu_order(line, &order_rev, order_pages, &order_count, &order_mask, 0);
+    }
+    else if (line[0] == 'n' && line[1] == ' ') {
+      if (x_order_seen++) x_order_ok=0;
+      else x_order_ok=parse_menu_order(line,&x_order_rev,x_order_pages,&x_order_count,&x_order_mask,1);
+    }
+    else if (line[0] == 'v' && line[1] == ' ') {
+      char lang[4]="";unsigned long long rev;int idle,level,home,mask,sleep,clock;
+      if(!x_seen++ && sscanf(line+1," %llu %d %d %d %d %3s %d %d",&rev,&idle,&level,&home,&mask,lang,&sleep,&clock)==8 &&
+         idle>=30&&idle<=600&&level>=20&&level<=255&&home>=0&&home<=SMS_PAGE&&mask>0&&
+         !(mask & ~(SMS_MENU_PAGES | (1 << STOCK_MENU)))&&(home==MENU||(mask&(1<<home)))&&
+         (sleep==0||sleep==1)&&(!strcmp(lang,"zh")||!strcmp(lang,"en"))&&
+         (clock==10000||(clock>=-720&&clock<=840))) {
+        x_ok=1;x_rev=rev;x_idle=idle;x_level=level;x_home=home;x_mask=mask;x_sleep=sleep;x_clock=clock;
+        snprintf(x_lang,sizeof(x_lang),"%s",lang);
+      } else x_ok=0;
     }
     /* V: the same settings with Proxy and Clash; preferred over C when valid. */
     else if (line[0] == 'V') {
@@ -460,7 +489,13 @@ static int parse_snapshot(char *buf, struct snapshot *out) {
     s.settings_rev = v_rev; s.idle_seconds = v_idle; s.brightness = v_level;
     s.home_page = v_home; s.menu_mask = v_mask; s.zh = strcmp(v_lang, "en") != 0;
   }
-  if (order_ok && order_seen == 1 && order_rev == s.settings_rev && order_mask == s.menu_mask) {
+  if(x_ok && x_seen==1 && x_rev==s.settings_rev) {
+    s.native_menu_record=1;s.clock_offset_minutes=x_clock;s.settings_rev=x_rev;
+    s.idle_seconds=x_idle;s.brightness=x_level;s.home_page=x_home;s.menu_mask=x_mask;s.idle_sleep=x_sleep;s.zh=strcmp(x_lang,"en")!=0;
+  }
+  if(s.native_menu_record && x_order_ok && x_order_seen==1 && x_order_rev==s.settings_rev && x_order_mask==s.menu_mask) {
+    s.menu_order_count=x_order_count;memcpy(s.menu_order,x_order_pages,sizeof(s.menu_order));
+  } else if (order_ok && order_seen == 1 && order_rev == s.settings_rev && order_mask == s.menu_mask) {
     s.menu_order_count = order_count;
     memcpy(s.menu_order, order_pages, sizeof(s.menu_order));
   }
@@ -678,7 +713,7 @@ static void track_status(int changed) {
   int relay_total=relay_view==RV_SCAN?data.relay.nw:data.relay.ns;
   if(relay_offset>=relay_total)relay_offset=relay_total?(relay_total-1)/4*4:0;
   if (changed == 2) {
-    page = settings_home;
+    page = settings_home == MENU ? DASHBOARD : settings_home;
     if (page == DEVICES) enter_devices();
     else if (page == SMS_PAGE) go(SMS_PAGE);
     else refresh_page();
@@ -1217,7 +1252,8 @@ static int input_self_test(void) {
   return 0;
 }
 static int panel(int heartbeat, int idle_seconds) {
-  page = MENU;
+  page = DASHBOARD;
+  menu_origin = DASHBOARD;
   struct qpic_ctx drm;
   struct input_touch input;
   int result = 1;
@@ -1283,7 +1319,7 @@ static int panel(int heartbeat, int idle_seconds) {
       settling = 0; (void)!write(heartbeat, "R", 1);
     }
     if (settling && now >= settle_at && screen_awake) need_draw = 1;
-    if (data.charging == 1 && screen_awake && (page == MENU || page == OVERVIEW) && now >= charge_at) {
+    if (data.charging == 1 && screen_awake && (page == DASHBOARD || page == MENU || page == OVERVIEW) && now >= charge_at) {
       charge_at = now + CHARGE_STEP_MS;
       charge_frame = (charge_frame + 1) % CHARGE_FRAMES;
       need_draw = 1;
@@ -1581,6 +1617,12 @@ static void capture_both(struct drm_buf *b,const char *dir,const char *name) {
   settings_zh=1;capture(b,dir,name);
   settings_zh=0;snprintf(en,sizeof(en),"en-%s",name);capture(b,dir,en);
   settings_zh=zh;
+}
+static int status_battery_label_is(const char *expected) {
+  const char *label=strstr(html,"id=\"battery-level\"");
+  if(!label||(label=strchr(label,'>'))==NULL)return 0;
+  size_t n=strlen(expected);
+  return !strncmp(label+1,expected,n)&&!strncmp(label+1+n,"</div>",6);
 }
 static void press_id(struct drm_buf *b,const char *id) {
   render(b);
@@ -1949,8 +1991,8 @@ static void esim_tests(struct drm_buf *b,const char *dir) {
   assert(!settings_sleep);
   char sleep_w[]="V 44 90 200 2 80 zh\nW 44 90 200 2 208 zh 1\n.\n",bad_sleep[]="V 45 90 200 2 80 zh\nW 45 90 200 2 208 zh 2\n.\n";
   assert(parse_snapshot(sleep_w,&prefs)&&update_settings(&prefs)&&settings_sleep&&settings_zh&&settings_menu==208);
-  page=MENU;capture(b,dir,"menu-sleep");assert(strstr(html,"空闲 90 秒后熄屏"));
-  settings_zh=0;capture(b,dir,"en-menu-sleep");assert(strstr(html,"Screen turns off after 90 s idle."));settings_zh=1;
+  page=MENU;capture(b,dir,"menu-sleep");assert(settings_sleep&&settings_idle==90&&!strstr(html,"空闲 90 秒后熄屏"));
+  settings_zh=0;capture(b,dir,"en-menu-sleep");assert(settings_sleep&&settings_idle==90&&!strstr(html,"Screen turns off after 90 s idle."));settings_zh=1;
   assert(parse_snapshot(bad_sleep,&prefs)&&update_settings(&prefs)&&!settings_sleep&&settings_menu==80);
   settings_zh=1;settings_menu=208;
   page=MENU;capture_both(b,dir,"menu-esim");assert(strstr(html,"act:esim")&&strstr(html,"HK"));
@@ -2017,7 +2059,7 @@ static void cfopt_tests(struct drm_buf *b,const char *dir) {
   capture_both(b,dir,"clash-cfopt-row");
   assert(strstr(html,"act:cfopt")&&strstr(html,"162.159.45.145")&&strstr(html,"act:core")&&strstr(html,"act:diag"));
   press_id(b,"cfopt");assert(page==CFOPT);capture_both(b,dir,"cfopt");
-  assert(strstr(html,"TLS 221 ms")&&strstr(html,"23.4 Mbps")&&strstr(html,"Every 4 h"));
+  assert(strstr(html,"TLS 221 ms")&&strstr(html,"23.4 Mbps")&&strstr(html,"Every 4 h")&&strstr(html,"6 MB/run"));
   press_id(b,"cfrun");expect_request("cfopt run\n");assert(pending_kind==JOB_CFOPT);reset_job();
   press_id(b,"cfauto");assert(dialog==5&&confirm_what==CF_CFOPT&&confirm_target==0);
   capture_both(b,dir,"cfopt-off-confirm");press_id(b,"confirm");expect_request("cfopt 3 off\n");reset_job();
@@ -2074,7 +2116,7 @@ static void tailscale_tests(struct drm_buf *b,const char *dir) {
   capture_both(b,dir,"menu-tailscale");
   assert(strstr(html,"act:tailscale")&&strstr(html,"Tailscale"));
   press_id(b,"tailscale");assert(page==TAILSCALE);capture_both(b,dir,"tailscale");
-  assert(strstr(html,"Status != forwarding")&&strstr(html,"us-west-exit"));
+  assert(strstr(html,"IPv4 only")&&strstr(html,"us-west-exit"));
   press_id(b,"ts1");assert(dialog==5&&confirm_what==CF_TS);
   capture_both(b,dir,"tailscale-confirm");press_id(b,"confirm");expect_request("ts 9 exit 42 1\n");reset_job();
   press_id(b,"tsnext");assert(ts_offset==2);press_id(b,"ts1");press_id(b,"confirm");expect_request("ts 9 exit 42 3\n");reset_job();
@@ -2154,7 +2196,7 @@ static void uplink_tests(struct drm_buf *b,const char *dir) {
   settings_menu=464;
   page=MENU;capture_both(b,dir,"menu-uplink");assert(strstr(html,"act:uplink")&&strstr(html,"On Wi-Fi"));
   press_id(b,"uplink");assert(page==UPLINK);capture_both(b,dir,"uplink");
-  assert(strstr(html,"192.168.50.23")&&strstr(html,"Wi-Fi upstream connected.")&&strstr(html,"Routing policy: see OpenUI")&&strstr(html,"-58 dBm"));
+  assert(strstr(html,"192.168.50.23")&&strstr(html,"On Wi-Fi")&&strstr(html,"-58 dBm"));
   assert(!strstr(html,"All traffic")&&!strstr(html,"Traffic: Wi-Fi"));
   /* Turning off asks first and names the revision shown. */
   press_id(b,"utoggle");assert(dialog==5&&confirm_what==CF_UPLINK&&!confirm_target&&confirm_rev==6);
@@ -2186,7 +2228,7 @@ static void uplink_tests(struct drm_buf *b,const char *dir) {
   snprintf(data.uplink.ip,sizeof(data.uplink.ip),"10.0.0.8");
   press_id(b,"confirm");expect_request("uplink login\n");assert(pending_kind==JOB_UPLINK&&!dialog&&pending_revision==0);reset_job();
   data.uplink.state='g';data.uplink.reason[0]=0;
-  capture_both(b,dir,"uplink-login");assert(strstr(html,"Routing policy: see OpenUI")&&strstr(html,"id=\"ulogin\" href=\"act:none\""));
+  capture_both(b,dir,"uplink-login");assert(strstr(html,"Login mode")&&strstr(html,"id=\"ulogin\" href=\"act:none\""));
   data.uplink.state='i';snprintf(data.uplink.reason,sizeof(data.uplink.reason),"internet");
   data.uplink.state='u';snprintf(data.uplink.reason,sizeof(data.uplink.reason),"supplicant");data.uplink.ssid[0]=0;data.uplink.ip[0]=0;
   capture(b,dir,"uplink-unavailable");assert(strstr(html,"wpa_supplicant"));
@@ -2264,7 +2306,9 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   press_id(b,"net1");expect_request("tool net_mode Only_5G\n");reset_job();
   press_id(b,"back");assert(page==MENU);
   press_id(b,"usb");assert(page==USB_PAGE);capture_both(b,dir,"toolbox-usb");
-  press_id(b,"ttl65");expect_request("tool ttl 65\n");reset_job();
+  press_id(b,"ttl65");expect_request("tool ttl 65\n");
+  {int zh=settings_zh;settings_zh=0;render(b);assert(strstr(html,"Applying")&&!strstr(html,"USB will disconnect"));settings_zh=zh;}
+  reset_job();
   press_id(b,"ttl117");expect_request("tool ttl 117\n");reset_job();
   /* Custom TTL: -/+ build a draft from the live value (64), Set applies it, and a preset
    * or leaving the page clears the draft. */
@@ -2280,6 +2324,7 @@ static void toolbox_tests(struct drm_buf *b, const char *dir) {
   press_id(b,"usb");assert(page==USB_PAGE&&ttl_draft==-1);capture_both(b,dir,"toolbox-usb");
   /* Picking only marks a mode; Apply sends it, and re-picking the active one disables Apply. */
   press_id(b,"usb1");assert(usb_draft==1&&!test_request[0]);capture_both(b,dir,"toolbox-usb-picked");
+  assert(strstr(html,"USB will disconnect briefly")&&strstr(html,"RNDIS"));
   press_id(b,"usbapply");expect_request("tool usb_mode ecm\n");assert(usb_draft==-1);reset_job();
   /* The agent replies before it switches: until H shows ECM the page says so and takes
    * no other pick, then it shows ECM as current. */
@@ -2424,7 +2469,10 @@ int main(int argc, char **argv) {
     (unsigned long long)time(NULL)-15,(unsigned long long)time(NULL));
   assert(parse_snapshot(example,&data));assert(data.n==5&&data.np==5&&data.battery==83);
   capture(&b,argv[1],"menu");press_id(&b,"overview");assert(page==OVERVIEW);
-  capture(&b,argv[1],"overview");press_id(&b,"back");assert(page==MENU);
+  capture(&b,argv[1],"overview");
+  {int x,y,w,h;assert(html_view_rect("#back",&x,&y,&w,&h));
+   assert(w>=48&&h>=48&&!strcmp(html_view_click(x+1,y+1),"act:back"));}
+  press_id(&b,"back");assert(page==MENU);
   press_id(&b,"wireguard");assert(page==WG);capture(&b,argv[1],"home");
   rotate_frame(&b);char path[512];snprintf(path,sizeof(path),"%s/home-panel.ppm",argv[1]);dump(&b,path);
   press_id(&b,"devices");assert(page==DEVICES);press_id(&b,"d1");assert(dirty&&draft.rows[1].selected);
@@ -2451,6 +2499,20 @@ int main(int argc, char **argv) {
   /* Ordered settings work for both rows and tiles; invalid extensions fall back. */
   {
     struct snapshot ordered;
+    char clock[8];status_clock(clock,1704067200,480);assert(!strcmp(clock,"08:00"));
+    status_clock(clock,1704067200,-330);assert(!strcmp(clock,"18:30"));
+    status_clock(clock,0,480);assert(!strcmp(clock,"--:--"));
+    assert(!strcmp(status_radio("SA",1),"5G")&&!strcmp(status_radio("NSA",1),"5G")&&!strcmp(status_radio("ENDC",1),"5G"));
+    assert(!strcmp(status_radio("LTE",1),"4G")&&!strcmp(status_radio("SA",0),"--"));
+    char ext[]="K 29 120 128 2 1552 zh 1\nN 29 3 4 10 9\nv 29 120 128 2 67088 zh 1 480\nn 29 4 16 4 10 9\n.\n";
+    assert(parse_snapshot(ext,&ordered)&&ordered.native_menu_record&&ordered.clock_offset_minutes==480&&ordered.menu_order_count==4&&update_settings(&ordered));
+    page=DASHBOARD;render(&b);
+    assert(strstr(html,"act:stock")&&strstr(html,"act:overview")&&!strstr(html,">OpenUI</div>"));
+    {int x,y,w,h;assert(html_view_rect("#stock",&x,&y,&w,&h));assert(x==11&&y==173&&w>=48&&h>=48);}
+    press_id(&b,"stock");assert(quitting);quitting=0;
+    page=MENU;render(&b);assert(strstr(html,"act:stock")&&strstr(html,"act:overview"));
+    char hidden[]="K 28 120 128 2 1552 zh 1\nN 28 3 4 10 9\nv 28 120 128 2 1552 zh 1 480\nn 28 3 4 10 9\n.\n";
+    assert(parse_snapshot(hidden,&ordered)&&update_settings(&ordered));page=MENU;render(&b);assert(!strstr(html,"act:stock"));
     char row[]="V 30 120 128 2 112 zh\nN 30 3 6 4 5\n.\n";
     assert(parse_snapshot(row,&ordered)&&ordered.menu_order_count==3&&update_settings(&ordered));
     page=MENU;render(&b);
@@ -2475,8 +2537,63 @@ int main(int argc, char **argv) {
     for(int i=0;i<15;i++) {
       char selector[32];int x,y,w,h;snprintf(selector,sizeof(selector),"#%s",all_ids[i]);
       assert(html_view_rect(selector,&x,&y,&w,&h));
-      assert(x==10+(i%3)*102&&y==68+(i/3)*50&&w>=48&&h>=48&&x+w<=W&&y+h<424);
+      assert(x==10+(i%3)*102&&y==98+(i/3)*50&&w>=48&&h>=48&&x+w<=W&&y+h<424);
     }
+    /* Dashboard shows exactly the first four selected features; More exposes
+     * the complete saved order, and back returns to the entry point. */
+    page=DASHBOARD;capture_both(&b,argv[1],"dashboard-all-features");
+    for(int i=0;i<4;i++) {
+      char selector[32];int x,y,w,h;snprintf(selector,sizeof(selector),"#%s",all_ids[i]);
+      assert(html_view_rect(selector,&x,&y,&w,&h));
+      assert(x==11+(i%2)*155&&y==173+(i/2)*106&&w>=48&&h>=48&&x+w<=W&&y+h<390);
+    }
+    assert(!strstr(html,"act:usb")&&!strstr(html,"act:wireguard")&&strstr(html,"act:more"));
+    press_id(&b,"booster");assert(page==BOOSTER_PAGE);press_id(&b,"back");assert(page==DASHBOARD);
+    press_id(&b,"more");assert(page==MENU);press_id(&b,"wireguard");assert(page==WG);
+    press_id(&b,"back");assert(page==MENU);press_id(&b,"back");assert(page==DASHBOARD);
+    /* Synthetic dashboard telemetry and a different order; never publish device data. */
+    {
+      struct toolbox_info saved=data.toolbox;unsigned long long stamp=data.stamp;
+      int old_mask=settings_menu,old_count=settings_order_count,old_order[18],old_native=settings_native_menu,old_clock=settings_clock_offset;
+      memcpy(old_order,settings_order,sizeof(old_order));
+      int sample[]={WIFI_PAGE,DEVICES,UPLINK,PROXY};
+      settings_menu=(1<<WIFI_PAGE)|(1<<DEVICES)|(1<<UPLINK)|(1<<PROXY);
+      settings_order_count=4;memcpy(settings_order,sample,sizeof(sample));
+      data.stamp=(unsigned long long)time(NULL);data.toolbox.has=1;data.toolbox.sim=1;
+      data.toolbox.rsrp=-89;data.toolbox.kbps_down=4500;data.toolbox.kbps_up=1234;
+      data.toolbox.wifi_2g_on=1;data.toolbox.wifi_clients=3;
+      snprintf(data.toolbox.carrier,sizeof(data.toolbox.carrier),"%s",L("Mobile network","移动网络"));
+      snprintf(data.toolbox.radio,sizeof(data.toolbox.radio),"5G");
+      page=DASHBOARD;capture_both(&b,argv[1],"dashboard-sample");
+      assert(strstr(html,"5G")&&strstr(html,"4.5Mb/s")&&strstr(html,"1.2Mb/s"));
+      assert(strstr(html,"act:wifi")&&strstr(html,"act:devices")&&strstr(html,"act:uplink")&&strstr(html,"act:proxy"));
+      data.toolbox.sim=0;render(&b);assert(strstr(html,"无 SIM 卡")&&!strstr(html,">5G</div>"));data.toolbox.sim=1;
+      press_id(&b,"wifi");assert(page==WIFI_PAGE);press_id(&b,"back");assert(page==DASHBOARD);
+      press_id(&b,"more");assert(page==MENU);press_id(&b,"uplink");assert(page==UPLINK);
+      press_id(&b,"back");assert(page==MENU);press_id(&b,"back");assert(page==DASHBOARD);
+      settings_menu=1<<WIFI_PAGE;settings_order_count=1;render(&b);
+      assert(strstr(html,"act:wifi")&&strstr(html,"act:more")&&!strstr(html,"act:proxy"));
+      data.toolbox.has=0;render(&b);assert(!strstr(html,"4.5Mb/s"));
+      /* A 5G SA device with the native-theme shortcut in the fourth slot. */
+      {int ordered_native[]={OVERVIEW,SIGNAL_PAGE,POWER_PAGE,STOCK_MENU};
+       settings_native_menu=1;settings_clock_offset=480;settings_order_count=4;
+       settings_menu=(1<<OVERVIEW)|(1<<SIGNAL_PAGE)|(1<<POWER_PAGE)|(1<<STOCK_MENU);
+       memcpy(settings_order,ordered_native,sizeof(ordered_native));
+       data.toolbox.has=1;data.toolbox.sim=1;snprintf(data.toolbox.radio,sizeof(data.toolbox.radio),"SA");
+       capture_both(&b,argv[1],"dashboard-native-theme");
+       assert(strstr(html,">5G</div>")&&strstr(html,"act:stock"));
+       int x,y,w,h;assert(html_view_rect("#stock",&x,&y,&w,&h));assert(x==166&&y==279&&w>=48&&h>=48);
+       int saved_battery=data.battery,saved_charging=data.charging,saved_frame=charge_frame;
+       data.battery=99;data.charging=1;data.toolbox.rsrp=-80;charge_frame=0;
+       capture_both(&b,argv[1],"dashboard-reference-charging");
+       assert(status_battery_label_is("99")&&html_view_rect("#charging-bolt",&x,&y,&w,&h));
+       assert(x==300&&y==11&&w==10&&h==15);
+       data.battery=saved_battery;data.charging=saved_charging;charge_frame=saved_frame;}
+      data.toolbox=saved;data.stamp=stamp;settings_menu=old_mask;settings_order_count=old_count;
+      settings_native_menu=old_native;settings_clock_offset=old_clock;
+      memcpy(settings_order,old_order,sizeof(old_order));
+    }
+    page=MENU;menu_origin=MENU;
     press_id(&b,"wireguard");assert(page==WG);page=MENU;
     char duplicate[]="V 32 120 128 2 112 zh\nN 32 3 6 6 4\n.\n";
     char wrong_rev[]="V 32 120 128 2 112 zh\nN 31 3 6 4 5\n.\n";
@@ -2505,15 +2622,16 @@ int main(int argc, char **argv) {
   assert(strstr(html,"⚡充电中")&&!strstr(html,"12%⚡")&&!strstr(html,"background:#f06a6a;border-radius")&&!strstr(html,"background:#2f8a55;border-radius"));
   {char frame0[16384];snprintf(frame0,sizeof(frame0),"%s",html);
    charge_frame=2;render(&b);assert(strstr(html,"background:#2f8a55;border-radius")&&strcmp(frame0,html));}
-  page=MENU;charge_frame=3;capture(&b,argv[1],"menu-charging");assert(strstr(html,"12%")&&!strstr(html,"⚡"));
-  assert(html_view_text_width_px("100%",16)<=38);
+  page=MENU;charge_frame=3;capture(&b,argv[1],"menu-charging");assert(status_battery_label_is("12")&&strstr(html,"id=\"charging-bolt\""));
+  assert(html_view_text_width_px("100",10)<=23);
   /* Charging pulses at both ends of the range; unknown and noncharging remain static. */
   for(int state=0;state<4;state++) {
     data.battery=state==0?0:state==3?-1:100;data.charging=state==2?0:1;
     charge_frame=0;render(&b);
-    const uint16_t before=((const uint16_t *)((const char *)b.map+21*b.pitch))[243];
+    int sample_x=(data.charging==1||data.charging==2?262:278)+3;
+    const uint16_t before=((const uint16_t *)((const char *)b.map+13*b.pitch))[sample_x];
     charge_frame=2;render(&b);
-    const uint16_t after=((const uint16_t *)((const char *)b.map+21*b.pitch))[243];
+    const uint16_t after=((const uint16_t *)((const char *)b.map+13*b.pitch))[sample_x];
     if(state<2)assert(before!=after);else assert(before==after);
     assert(!strstr(html,"⚡"));
   }
@@ -2521,23 +2639,27 @@ int main(int argc, char **argv) {
   uint16_t pulse_first=0,pulse_last=0;
   for(int frame=0;frame<CHARGE_FRAMES;frame++) {
     charge_frame=frame;assert(render_changed(&b,0));
-    uint16_t sample=((const uint16_t *)((const char *)b.map+21*b.pitch))[243];
+    uint16_t sample=((const uint16_t *)((const char *)b.map+13*b.pitch))[265];
     if(frame)assert(sample!=pulse_last);else pulse_first=sample;
     pulse_last=sample;
   }
   charge_frame=0;assert(render_changed(&b,0));
-  assert(((const uint16_t *)((const char *)b.map+21*b.pitch))[243]==pulse_first);
-  data.battery=100;data.charging=2;capture(&b,argv[1],"menu-battery-full");assert(strstr(html,"100%")&&!strstr(html,"⚡"));
-  /* Full fill reaches the bottom inside edge; the battery tip and signal have
-   * four background pixels between them in the rendered RGB565 frame. */
-  {const uint16_t *row30=(const uint16_t *)((const char *)b.map+30*b.pitch);
-   const uint16_t *row32=(const uint16_t *)((const char *)b.map+32*b.pitch);
-   const uint16_t *row35=(const uint16_t *)((const char *)b.map+35*b.pitch);
-   const uint16_t *row36=(const uint16_t *)((const char *)b.map+36*b.pitch);
-   assert(row35[246]==row32[246]&&row35[246]!=row36[246]);
-   assert(row30[289]!=row30[290]&&row30[290]==row30[291]&&row30[290]==row30[292]&&row30[290]==row30[293]&&row30[293]!=row30[294]);}
-  data.battery=0;data.charging=0;capture(&b,argv[1],"menu-battery-empty");assert(strstr(html,"0%")&&strstr(html,"#f06a6a"));
-  data.battery=-1;capture(&b,argv[1],"menu-battery-unknown");assert(strstr(html,"--%")&&strstr(html,"#9aa1ac"));
+  assert(((const uint16_t *)((const char *)b.map+13*b.pitch))[265]==pulse_first);
+  data.battery=100;data.charging=2;capture(&b,argv[1],"menu-battery-full");assert(status_battery_label_is("100")&&strstr(html,"id=\"charging-bolt\""));
+  /* The fill still reaches the inside edge after moving the battery right. */
+  {const uint16_t *row22=(const uint16_t *)((const char *)b.map+22*b.pitch);
+   const uint16_t *row24=(const uint16_t *)((const char *)b.map+24*b.pitch);
+   const uint16_t *row27=(const uint16_t *)((const char *)b.map+27*b.pitch);
+   assert(row24[265]==row22[265]&&row24[265]!=row27[265]);}
+  data.battery=0;data.charging=0;capture(&b,argv[1],"menu-battery-empty");assert(status_battery_label_is("0")&&!strstr(html,"id=\"charging-bolt\""));
+  /* The compact green fill reflects real capacity rather than always appearing full. */
+  {const uint16_t *row=(const uint16_t *)((const char *)b.map+13*b.pitch);
+   uint16_t empty=row[281];assert(row[303]==empty);
+   data.battery=50;capture(&b,argv[1],"menu-battery-half");row=(const uint16_t *)((const char *)b.map+13*b.pitch);
+   uint16_t green=row[281];assert(green!=empty&&row[303]==empty);
+   data.battery=100;render(&b);row=(const uint16_t *)((const char *)b.map+13*b.pitch);
+   assert(row[281]==green&&row[303]==green);}
+  data.battery=-1;capture(&b,argv[1],"menu-battery-unknown");assert(status_battery_label_is("--")&&strstr(html,"#9aa1ac"));
   data.battery=100;data.charging=2;page=OVERVIEW;capture_both(&b,argv[1],"battery-full");render(&b);assert(strstr(html,"⚡已充满")&&!strstr(html,"background:#2f8a55;border-radius"));
   data.charging=0;charge_frame=0;
   data.battery=-1;capture(&b,argv[1],"battery-unknown");assert(strstr(html,"--%"));
@@ -2556,7 +2678,7 @@ int main(int argc, char **argv) {
   assert(parse_snapshot(legacy,&prefs)&&update_settings(&prefs)==1&&settings_zh);
   page=MENU;capture(&b,argv[1],"menu-zh");assert(strstr(html,"原生主题"));
   {int x,y,w,h;assert(html_view_rect("#stock",&x,&y,&w,&h));
-   assert(x==80&&y==4&&w==96&&h==48&&x+w<=180);
+   assert(x==112&&y==148&&w==96&&h==48);
    assert(!strcmp(html_view_click(x+1,y+1),"act:stock"));}
   page=MENU;press_id(&b,"stock");assert(quitting);quitting=0;
   puts("PASS DevUI HTML hit testing, menu navigation, profile version capture, device pagination/drafts, escaping, confirmations, disabled states and rotation");

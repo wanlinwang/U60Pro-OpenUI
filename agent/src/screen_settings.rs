@@ -10,11 +10,15 @@ use std::{
 };
 const DIR: &str = "/data/local/tmp/openui-devui";
 const FILE: &str = "/data/local/tmp/openui-devui/settings.json";
+/// New screen-only choices live beside, not inside, the legacy settings file:
+/// an older agent must still be able to read the saved settings after rollback.
+const EXTRAS_FILE: &str = "/data/local/tmp/openui-devui/menu-extras.json";
+pub const SYSTEM_CLOCK_OFFSET: i32 = 10_000;
 /// Present once settings have been checked for the pre-proxy menu, so an owner who picks
 /// the old four features again keeps them.
 const MIGRATED: &str = "/data/local/tmp/openui-devui/menu-v2";
 /// Features the screen menu can show, in menu order, in a grid of up to 3x6 tiles.
-const MENU_ITEMS: [&str; 15] = [
+const MENU_ITEMS: [&str; 16] = [
     "overview",
     "proxy",
     "wireguard",
@@ -30,6 +34,7 @@ const MENU_ITEMS: [&str; 15] = [
     "booster",
     "profiles",
     "devices",
+    "stock",
 ];
 const DEFAULT_MENU: [&str; 4] = ["overview", "proxy", "wireguard", "clash"];
 /// The default before Proxy and Clash existed: every feature there was.
@@ -66,6 +71,18 @@ pub struct Settings {
     /// When idle, turn the screen off and stay in DevUI instead of returning to the stock UI.
     #[serde(default = "enabled")]
     pub idle_sleep: bool,
+    /// Fixed UTC offset for the screen clock; 10000 follows the device timezone.
+    #[serde(
+        default = "system_clock_offset",
+        skip_serializing_if = "is_system_clock_offset"
+    )]
+    pub clock_offset_minutes: i32,
+}
+fn system_clock_offset() -> i32 {
+    SYSTEM_CLOCK_OFFSET
+}
+fn is_system_clock_offset(value: &i32) -> bool {
+    *value == SYSTEM_CLOCK_OFFSET
 }
 fn default_language() -> String {
     "zh".into()
@@ -86,6 +103,7 @@ impl Default for Settings {
             touch_enabled: true,
             open_at_boot: false,
             idle_sleep: true,
+            clock_offset_minutes: SYSTEM_CLOCK_OFFSET,
         }
     }
 }
@@ -106,6 +124,7 @@ fn page_number(s: &str) -> u32 {
         "booster" => 13,
         "tailscale" => 14,
         "sms" => 15,
+        "stock" => 16,
         _ => 2,
     }
 }
@@ -130,8 +149,15 @@ impl Settings {
                 return Err("Invalid or duplicate menu item");
             }
         }
-        if self.home_page != "menu" && !self.menu_items.contains(&self.home_page) {
+        if self.home_page == "stock"
+            || (self.home_page != "menu" && !self.menu_items.contains(&self.home_page))
+        {
             return Err("The startup page must be visible in the menu");
+        }
+        if self.clock_offset_minutes != SYSTEM_CLOCK_OFFSET
+            && !(-720..=840).contains(&self.clock_offset_minutes)
+        {
+            return Err("Invalid screen time zone offset");
         }
         if !["zh", "en"].contains(&self.language.as_str()) {
             return Err("Language must be zh or en");
@@ -143,10 +169,39 @@ impl Settings {
         let pages = self
             .menu_items
             .iter()
+            .filter(|item| item.as_str() != "stock")
+            .map(|item| page_number(item).to_string())
+            .collect::<Vec<_>>();
+        if pages.is_empty() {
+            return String::new();
+        }
+        format!("N {} {} {}\n", self.revision, pages.len(), pages.join(" "))
+    }
+    /// Extended record for the rearrangeable native-theme button and screen-only clock.
+    pub fn screen_extras_record(&self) -> String {
+        let mask = self
+            .menu_items
+            .iter()
+            .fold(0u32, |m, s| m | (1 << page_number(s)));
+        let pages = self
+            .menu_items
+            .iter()
             .map(|item| page_number(item).to_string())
             .collect::<Vec<_>>()
             .join(" ");
-        format!("N {} {} {}\n", self.revision, self.menu_items.len(), pages)
+        format!(
+            "v {} {} {} {} {mask} {} {} {}\nn {} {} {}\n",
+            self.revision,
+            self.idle_seconds,
+            self.brightness,
+            page_number(&self.home_page),
+            self.language,
+            u8::from(self.idle_sleep),
+            self.clock_offset_minutes,
+            self.revision,
+            self.menu_items.len(),
+            pages
+        )
     }
     /// `C` for screens built before Proxy and Clash, which drop a record naming a page
     /// they lack: only their pages, all of them when none is chosen, and the menu as the
@@ -164,7 +219,8 @@ impl Settings {
         let mask = self
             .menu_items
             .iter()
-            .fold(0u32, |m, s| m | (1 << page_number(s)));
+            .fold(0u32, |m, s| m | (1 << page_number(s)))
+            & !(1 << 16);
         let home = page_number(&self.home_page);
         // K (space-delimited) extends F with SMS; old screens ignore it.
         let sms = if mask & (1 << 15) != 0 {
@@ -266,10 +322,76 @@ fn migrate(s: &Settings) -> Option<Settings> {
         ..s.clone()
     })
 }
-fn persist(s: &Settings) -> std::io::Result<()> {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ExtraRecord {
+    revision: u64,
+    menu_items: Vec<String>,
+    clock_offset_minutes: i32,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ExtraJournal {
+    current: ExtraRecord,
+    previous: Option<ExtraRecord>,
+}
+fn extra_record(s: &Settings) -> ExtraRecord {
+    ExtraRecord {
+        revision: s.revision,
+        menu_items: s.menu_items.clone(),
+        clock_offset_minutes: s.clock_offset_minutes,
+    }
+}
+/// Recover the matching version after an interrupted two-file write. On a first
+/// upgrade existing items keep their order and the stock button starts on the dashboard.
+fn apply_extras(mut s: Settings, journal: Option<&ExtraJournal>) -> Settings {
+    let extra = journal.and_then(|j| {
+        std::iter::once(&j.current)
+            .chain(j.previous.iter())
+            .find(|e| e.revision == s.revision)
+    });
+    if let Some(extra) = extra {
+        let mut candidate = s.clone();
+        candidate.menu_items = extra.menu_items.clone();
+        candidate.clock_offset_minutes = extra.clock_offset_minutes;
+        if candidate.validate().is_ok() {
+            return candidate;
+        }
+    }
+    if !s.menu_items.iter().any(|item| item == "stock") && s.menu_items.len() < 18 {
+        s.menu_items.insert(s.menu_items.len().min(3), "stock".into());
+    }
+    s
+}
+/// The old file always remains readable by a pre-feature agent after rollback.
+fn legacy_settings(s: &Settings) -> Settings {
+    let mut legacy = s.clone();
+    legacy.menu_items.retain(|item| item != "stock");
+    if legacy.menu_items.is_empty() {
+        legacy.menu_items = DEFAULT_MENU.map(String::from).to_vec();
+    }
+    if legacy.home_page != "menu" && !legacy.menu_items.contains(&legacy.home_page) {
+        legacy.home_page = "menu".into();
+    }
+    legacy.clock_offset_minutes = SYSTEM_CLOCK_OFFSET;
+    legacy
+}
+fn persist(s: &Settings, previous: Option<&Settings>) -> std::io::Result<()> {
     fs::create_dir_all(DIR)?;
     fs::set_permissions(DIR, fs::Permissions::from_mode(0o700))?;
-    storage::atomic_write(Path::new(FILE), &serde_json::to_vec_pretty(s)?)?;
+    let journal = ExtraJournal {
+        current: extra_record(s),
+        previous: previous.map(extra_record),
+    };
+    // Journal first: if the second write fails, the previous revision still loads.
+    storage::atomic_write(
+        Path::new(EXTRAS_FILE),
+        &serde_json::to_vec_pretty(&journal)?,
+    )?;
+    storage::atomic_write(
+        Path::new(FILE),
+        &serde_json::to_vec_pretty(&legacy_settings(s))?,
+    )?;
     // Best effort: without it the next start checks the menu again.
     let _ = storage::atomic_write(Path::new(MIGRATED), b"2\n");
     Ok(())
@@ -277,15 +399,20 @@ fn persist(s: &Settings) -> std::io::Result<()> {
 fn state() -> &'static Mutex<Settings> {
     static STATE: OnceLock<Mutex<Settings>> = OnceLock::new();
     STATE.get_or_init(|| {
+        let extras = fs::read(EXTRAS_FILE)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<ExtraJournal>(&b).ok());
         let saved = fs::read(FILE)
             .ok()
             .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
             .filter(|s| s.validate().is_ok());
+        let has_saved = saved.is_some();
         let settings = match saved {
             Some(s) if !Path::new(MIGRATED).exists() => match migrate(&s) {
                 // Kept in memory even if it cannot be saved; the check repeats next start.
                 Some(next) => {
-                    let _ = persist(&next);
+                    let next = apply_extras(next, None);
+                    let _ = persist(&next, Some(&s));
                     next
                 }
                 None => {
@@ -296,7 +423,10 @@ fn state() -> &'static Mutex<Settings> {
             Some(s) => s,
             None => Settings::default(),
         };
-        Mutex::new(settings)
+        Mutex::new(apply_extras(
+            settings,
+            if has_saved { extras.as_ref() } else { None },
+        ))
     })
 }
 pub fn current() -> Settings {
@@ -320,6 +450,7 @@ struct Update {
     touch_enabled: Option<bool>,
     open_at_boot: Option<bool>,
     idle_sleep: Option<bool>,
+    clock_offset_minutes: Option<i32>,
 }
 /// A validated settings change, or the HTTP status and message to reject it with.
 type Prepared = Result<Settings, (u16, &'static str)>;
@@ -344,6 +475,7 @@ fn prepare(old: &Settings, body: &[u8]) -> Prepared {
         touch_enabled: u.touch_enabled.unwrap_or(old.touch_enabled),
         open_at_boot: u.open_at_boot.unwrap_or(old.open_at_boot),
         idle_sleep: u.idle_sleep.unwrap_or(old.idle_sleep),
+        clock_offset_minutes: u.clock_offset_minutes.unwrap_or(old.clock_offset_minutes),
     };
     s.validate().map_err(|e| (400, e))?;
     Ok(s)
@@ -377,7 +509,7 @@ fn save(prepare: fn(&Settings, &[u8]) -> Prepared, body: &[u8]) -> (u16, Value) 
     if next.revision == saved.revision {
         return (200, json!({"ok":true,"data":*saved}));
     }
-    if persist(&next).is_err() {
+    if persist(&next, Some(&saved)).is_err() {
         return (
             500,
             json!({"ok":false,"error":"Cannot save DevUI settings"}),
@@ -395,6 +527,47 @@ pub fn set_language(body: &[u8]) -> (u16, Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_menu_and_clock_keep_old_settings_readable_and_recoverable() {
+        let old = Settings::default();
+        let upgraded = apply_extras(old.clone(), None);
+        assert_eq!(
+            upgraded.menu_items.get(3).map(String::as_str),
+            Some("stock")
+        );
+        let mut next = upgraded.clone();
+        next.revision += 1;
+        next.menu_items = ["stock", "overview", "proxy"].map(String::from).to_vec();
+        next.clock_offset_minutes = 480;
+        assert!(next.validate().is_ok());
+        let legacy = legacy_settings(&next);
+        let encoded = serde_json::to_string(&legacy).unwrap();
+        assert!(!encoded.contains("stock") && !encoded.contains("clock_offset"));
+        assert!(legacy.validate().is_ok());
+        let journal = ExtraJournal {
+            current: extra_record(&next),
+            previous: Some(extra_record(&upgraded)),
+        };
+        let loaded = apply_extras(legacy.clone(), Some(&journal));
+        assert_eq!(loaded.menu_items, next.menu_items);
+        assert_eq!(loaded.clock_offset_minutes, 480);
+        // A crash before the legacy file changes restores the prior revision.
+        let recovered = apply_extras(old, Some(&journal));
+        assert_eq!(recovered.menu_items, upgraded.menu_items);
+        assert_eq!(recovered.clock_offset_minutes, SYSTEM_CLOCK_OFFSET);
+        assert_eq!(next.menu_order_record(), "N 2 2 4 5\n");
+        assert_eq!(
+            next.screen_extras_record(),
+            "v 2 120 128 2 65584 zh 1 480\nn 2 3 16 4 5\n"
+        );
+        let mut only_stock = next.clone();
+        only_stock.menu_items = vec!["stock".into()];
+        assert!(only_stock.validate().is_ok() && legacy_settings(&only_stock).validate().is_ok());
+        only_stock.home_page = "stock".into();
+        assert!(only_stock.validate().is_err());
+        next.clock_offset_minutes = 841;
+        assert!(next.validate().is_err());
+    }
     fn body() -> Value {
         json!({"expected_revision":1,"shortcut_enabled":true,"brightness":160,"idle_seconds":90,"home_page":"overview","menu_items":["overview","wireguard"]})
     }
@@ -722,7 +895,7 @@ mod tailscale_settings_tests {
         assert_eq!(old.menu_items, DEFAULT_MENU.to_vec());
         s.home_page = "menu".into();
         s.menu_items = MENU_ITEMS.iter().map(|s| s.to_string()).collect();
-        assert_eq!(s.menu_items.len(), 15);
+        assert_eq!(s.menu_items.len(), 16);
         assert!(s.validate().is_ok());
     }
 }

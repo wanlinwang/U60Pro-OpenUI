@@ -48,7 +48,7 @@ static void usblan_tests(struct drm_buf *b,const char *dir) {
   assert(!strcmp(data.toolbox.carrier,"T-Mobile"));
   render(b);assert(!strstr(html,"T-Mobile")&&!strstr(html,"dBm")&&!strstr(html,"5G SA"));
   assert(!strstr(html,"left:10px;top:64px;width:300px;height:84px"));
-  assert(strstr(html,"left:304px;top:23px;width:3px;height:12px;background:#4cc97a")&&strstr(html,"left:309px;top:20px;width:3px;height:15px;background:#323a47"));
+  assert(strstr(html,"left:212px;top:13px;width:5px;height:14px;border-radius:1px;background:#ffffff")&&strstr(html,"left:219px;top:11px;width:3px;height:16px;border-radius:1px;background:#3a414b"));
   capture_both(b,dir,"menu-carrier");
   /* An older H39 or missing carrier still parses without restoring the card. */
   usblan_fixture("\t1\t2\trndis0\t100\t100\t19\t18");page=MENU;render(b);
@@ -65,7 +65,7 @@ static void usblan_tests(struct drm_buf *b,const char *dir) {
   }
   assert(data.toolbox.sim==0&&data.toolbox.rsrp==NO_FIGURE&&data.toolbox.sinr==NO_FIGURE&&data.toolbox.rsrq==NO_FIGURE);
   page=MENU;render(b);assert(!strstr(html,"No SIM")&&!strstr(html,"dBm")&&!strstr(html,"LIMITED"));
-  assert(strstr(html,"left:294px;top:29px;width:3px;height:6px;background:#323a47"));
+  assert(strstr(html,"left:198px;top:21px;width:5px;height:6px;border-radius:1px;background:#3a414b"));
   capture_both(b,dir,"menu-no-sim");
   page=SIGNAL_PAGE;render(b);assert(strstr(html,"No SIM")&&!strstr(html," dBm")&&!strstr(html,"LIMITED"));
   capture_both(b,dir,"signal-no-sim");

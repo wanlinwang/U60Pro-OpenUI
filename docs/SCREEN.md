@@ -286,8 +286,14 @@ python3 scripts/verify-devui-settings.py --gateway 192.168.0.1 --port 2222 \
   sends its language after sign-in and on every switch, so the screen follows it.
   A change bumps the settings revision; the same language is a no-op. Settings saved
   before this field existed load as Chinese.
-  Settings are atomically stored in `/data/local/tmp/openui-devui/settings.json`
-  with mode 0600 in a 0700 directory.
+  The legacy settings remain in `/data/local/tmp/openui-devui/settings.json`;
+  the separately versioned `menu-extras.json` holds the native-theme card's
+  placement and the touchscreen clock's optional fixed UTC offset. A two-version
+  journal retains the matching settings if either file update is interrupted.
+  Both are written with mode 0600 in a 0700 directory; older agents can still read
+  the legacy file after rollback. The screen clock follows the device timezone by
+  default; a fixed offset affects only display, not the system clock, and does not
+  automatically follow daylight-saving changes.
 - Private `/tmp/openui-screen/control.sock`: mode 0600, parent directory 0700.
   The screen receives redacted `S`, `P`, `D`, `O`, `C` and `J` records. `C` contains
   the DevUI revision, timeout, brightness, startup page, visible-page bitmask and

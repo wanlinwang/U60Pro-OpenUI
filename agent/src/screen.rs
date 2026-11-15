@@ -447,15 +447,19 @@ fn refresh_system(state: &AppState) {
         refresh_toolbox(state, false);
     }
 }
-/// Menu features that read the `H` record (Overview for its USB LAN switch); without one
-/// of them it is never read.
+/// The dashboard uses the `H` record for carrier, radio and live traffic, even
+/// when all individual toolbox features have been hidden from the menu.
 const TOOLBOX_PAGES: [&str; 6] = ["overview", "wifi", "signal", "usb", "power", "booster"];
 fn toolbox_wanted() -> bool {
     let s = crate::screen_settings::current();
-    s.menu_items
-        .iter()
-        .chain(std::iter::once(&s.home_page))
-        .any(|p| TOOLBOX_PAGES.contains(&p.as_str()))
+    toolbox_wanted_for(&s, running())
+}
+fn toolbox_wanted_for(s: &crate::screen_settings::Settings, screen_active: bool) -> bool {
+    screen_active
+        || s.menu_items
+            .iter()
+            .chain(std::iter::once(&s.home_page))
+            .any(|p| TOOLBOX_PAGES.contains(&p.as_str()))
 }
 fn signal_wanted() -> bool {
     let s = crate::screen_settings::current();
@@ -686,6 +690,7 @@ fn status() -> String {
     let settings = crate::screen_settings::current();
     let mut tail = settings.projection();
     tail.push_str(&settings.menu_order_record());
+    tail.push_str(&settings.screen_extras_record());
     // Cached projection only; the dedicated native-service worker never blocks this socket.
     if let Some(s) = crate::admin_services::snapshot() {
         tail.push_str(&ipc::admin_record(&s));
@@ -1255,6 +1260,21 @@ mod signal_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dashboard_requests_status_even_when_toolbox_items_are_hidden() {
+        let s = crate::screen_settings::Settings {
+            home_page: "proxy".into(),
+            menu_items: vec!["proxy".into()],
+            ..Default::default()
+        };
+        assert!(toolbox_wanted_for(&s, true));
+        assert!(!toolbox_wanted_for(&s, false));
+        let with_signal = crate::screen_settings::Settings {
+            menu_items: vec!["signal".into()],
+            ..s
+        };
+        assert!(toolbox_wanted_for(&with_signal, false));
+    }
     #[test]
     fn boot_open_skips_power_off_charging() {
         assert!(charging_boot(

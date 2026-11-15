@@ -832,7 +832,7 @@ export type ClashCoreAction =
   | { action: 'rollback' }
   | { action: 'geodata'; route?: ClashCoreRoute; mirror?: string }
 
-export type DevUIPageId = 'sms' | 'tailscale' | 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' | 'uplink' | 'profiles' | 'devices' | 'wifi' | 'signal' | 'usb' | 'power' | 'booster'
+export type DevUIPageId = 'sms' | 'tailscale' | 'overview' | 'proxy' | 'wireguard' | 'clash' | 'esim' | 'uplink' | 'profiles' | 'devices' | 'wifi' | 'signal' | 'usb' | 'power' | 'booster' | 'stock'
 export interface DevUISettings {
   revision: number
   shortcut_enabled: boolean
@@ -844,6 +844,8 @@ export interface DevUISettings {
   idle_sleep?: boolean
   brightness: number
   idle_seconds: number
+  /** 10000 or absent follows the device timezone; otherwise a fixed UTC offset in minutes. */
+  clock_offset_minutes?: number
   home_page: 'menu' | DevUIPageId
   menu_items: DevUIPageId[]
   /** Screen language; set by the panel's language switch through screenLanguageSet. */

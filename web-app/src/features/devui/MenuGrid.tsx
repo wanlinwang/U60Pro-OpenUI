@@ -75,12 +75,12 @@ export default function MenuGrid({ pages, items, disabled, onChange }: {
   function cell(feature: MenuFeature | undefined, zone: Zone, index: number) {
     const highlighted = target?.zone === zone && (zone === 'candidate' || target.index === index)
     return <div key={feature?.id ?? `empty-${index}`} data-menu-zone={zone} data-menu-index={index}
-      data-menu-feature={feature?.id} className={`relative h-[50px] min-w-0 rounded-xl ${highlighted ? 'ring-2 ring-[#4c9eeb]' : ''}`}>
+      data-menu-feature={feature?.id} className={`relative h-[50px] min-w-0 rounded-lg ${highlighted ? 'ring-2 ring-[#4c9eeb]' : ''}`}>
       {feature ? <>
         <button type="button" disabled={disabled} title={t(feature.description)} aria-label={t('Drag {name}', { name: t(feature.title) })}
           onPointerDown={e => down(e, feature.id)} onPointerMove={move} onPointerUp={up} onPointerCancel={clearDrag} onLostPointerCapture={clearDrag}
           onKeyDown={e => keyboard(e, feature.id)}
-          className={`h-full w-full touch-none rounded-xl border border-[#2a313d] bg-[#1a1f28] px-2 py-1 text-left text-[#e8eaee] enabled:cursor-grab enabled:active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4c9eeb] disabled:opacity-50 ${ghost?.id === feature.id ? 'opacity-40' : ''}`}>
+          className={`h-full w-full touch-none rounded-lg border border-[#30343a] bg-[#202329] px-2 py-1 text-left text-[#e8eaee] enabled:cursor-grab enabled:active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4c9eeb] disabled:opacity-50 ${ghost?.id === feature.id ? 'opacity-40' : ''}`}>
           <span className="block truncate text-[14px] font-semibold leading-5">{tileTitle(feature)}</span>
           <span className="block truncate pr-5 text-[11px] leading-4 text-[#9aa1ac]">{feature.id === 'overview' ? 'CPU · ↓ · ↑' : '—'}</span>
         </button>
@@ -89,14 +89,23 @@ export default function MenuGrid({ pages, items, disabled, onChange }: {
           title={zone === 'display' ? t('Move to candidates') : t('Add to display')}
           onClick={() => place(feature.id, zone === 'display' ? 'candidate' : 'display', items.length)}
           className="absolute bottom-0 right-0 flex h-6 w-6 items-center justify-center rounded-lg text-[17px] font-semibold text-[#9aa1ac] hover:bg-[#303a49] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4c9eeb] disabled:opacity-30">{zone === 'display' ? '−' : '+'}</button>
-      </> : <div className="h-full rounded-xl border border-dashed border-[#29313d]" aria-hidden="true" />}
+      </> : <div className="h-full rounded-lg border border-dashed border-[#29313d]" aria-hidden="true" />}
     </div>
   }
   return <div className="grid gap-5 lg:grid-cols-2">
+    <section aria-label={t('Home screen preview')} className="lg:col-span-2">
+      <div className="mb-2 text-[13px] font-semibold text-ink">{t('Home screen preview')}</div>
+      <div className="max-w-[320px] rounded-2xl bg-[#0b0d11] p-3 text-[#e8eaee]">
+        <div aria-hidden="true" className="mb-2 flex items-center justify-between text-xs font-semibold"><span>12:34</span><span>▂▄▆ 5G ▰</span></div>
+        <div className="mb-2 rounded-lg border border-[#292d34] bg-[#191c21] px-3 py-2 text-xs text-[#9aa1ac]">{t('Mobile network')} · ↓ ↑</div>
+        <div className="grid grid-cols-2 gap-1">{Array.from({ length: 4 }, (_, i) => <div key={i} className="flex h-12 items-center justify-center rounded-lg border border-[#30343a] bg-[#202329] px-2 text-center text-sm font-semibold">{displayed[i] ? tileTitle(displayed[i]) : '—'}</div>)}</div>
+        <div className="mt-2 rounded-lg border border-[#30343a] bg-[#202329] py-2 text-center text-sm font-semibold">▦ {t('More')}</div>
+      </div>
+    </section>
     <section aria-label={t('Display area')} className="min-w-0">
       <div className="mb-2 flex items-center justify-between text-[13px] font-semibold text-ink"><span>{t('Display area')}</span><span className="text-xs font-normal text-ink3">{items.length} / {CAPACITY}</span></div>
       <div data-menu-zone="display" className="max-w-[420px] rounded-2xl bg-[#0b0d11] p-3">
-        <div aria-hidden="true" className="mb-3 flex items-center justify-between text-[#e8eaee]"><span className="font-bold">OpenUI</span><span className="rounded-md border border-[#2c3441] bg-[#1b2029] px-2 py-1 text-xs">{t('Native theme')}</span><span className="text-xs text-[#9aa1ac]">▱ ▂▄▆</span></div>
+        <div aria-hidden="true" className="mb-3 flex items-center justify-between text-[#e8eaee]"><span className="font-bold">← {t('More')}</span><span className="text-xs text-[#9aa1ac]">▂▄▆ 5G ▰</span></div>
         <div className="grid grid-cols-3 gap-1">{Array.from({ length: CAPACITY }, (_, i) => cell(displayed[i], 'display', i))}</div>
       </div>
     </section>
@@ -106,6 +115,6 @@ export default function MenuGrid({ pages, items, disabled, onChange }: {
         <div className="grid grid-cols-3 gap-1">{Array.from({ length: Math.max(3, Math.ceil(candidates.length / 3) * 3) }, (_, i) => cell(candidates[i], 'candidate', i))}</div>
       </div>
     </section>
-    {ghost && <div aria-hidden="true" className="pointer-events-none fixed z-50 w-28 rounded-xl border border-[#4c9eeb] bg-[#1a1f28] px-2 py-2 text-sm font-semibold text-white shadow-lg" style={{ left: ghost.x + 12, top: ghost.y + 12 }}>{tileTitle(pages.find(p => p.id === ghost.id)!)}</div>}
+    {ghost && <div aria-hidden="true" className="pointer-events-none fixed z-50 w-28 rounded-lg border border-[#4c9eeb] bg-[#202329] px-2 py-2 text-sm font-semibold text-white shadow-lg" style={{ left: ghost.x + 12, top: ghost.y + 12 }}>{tileTitle(pages.find(p => p.id === ghost.id)!)}</div>}
   </div>
 }

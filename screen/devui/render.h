@@ -128,11 +128,11 @@ static const char *active_profile(void) {
 static int selected_count(void) {
   int n=0;for(int i=0;i<data.n;i++) n+=data.rows[i].selected;return n;
 }
-/* The title bar: back at the top left, then the page title. Pages start below y 64. */
+/* A compact back target and centered title, with the full 48px touch area. */
 static void header(const char *title) {
   rect(0,0,W,61,"bar",NULL);
-  linkbox(6,6,84,48,"back",L("‹ Back","‹ 返回"),1,PLAIN);
-  add("<div class=\"box title\" style=\"left:102px;top:14px;width:206px;height:32px\">");shortened(title,206,24);add("</div>");
+  add("<a id=\"back\" href=\"act:back\" class=\"box center head\" style=\"left:4px;top:6px;width:48px;height:48px;font-size:24px;line-height:48px\">&#8592;</a>");
+  add("<div class=\"box title center\" style=\"left:56px;top:14px;width:208px;height:32px\">");shortened(title,208,24);add("</div>");
 }
 static void dot(int x, int y, const char *color) {
   add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:10px;height:10px;border-radius:5px;background:%s\"></div>",x,y,color);
@@ -154,24 +154,81 @@ static void battery_badge(int x, int y, int large) {
   if(data.battery<0)snprintf(label,sizeof(label),"--%%");else snprintf(label,sizeof(label),plugged&&!large?"%d%%⚡":"%d%%",percent);
   if(large)box(x+w+14,y-3,120,36,"big",label);else box(x+w+10,y-2,60,20,"head",label);
 }
-/* A compact status battery with a legible percentage over a dark level fill. */
+/* Compact status battery: the number is the percentage, without a percent sign. */
 static void header_battery(int x,int y) {
   int percent=data.battery<0?0:data.battery>100?100:data.battery;
-  int charging=data.battery>=0&&data.charging==1;
-  const char *outline=data.battery<0?"#9aa1ac":percent<=20&&!charging?"#f06a6a":"#4cc97a";
-  const char *fill=percent<=20&&!charging?"#652b2b":"#194e31";
-  /* Pulsing both the background and level makes charging visible even at 0% or 100%.
-   * Dark colors preserve contrast with the white percentage at every frame. */
-  static const char *const pulse_bg[]={"#101d17","#132b20","#183929","#132b20"};
-  static const char *const pulse_fill[]={"#194e31","#245e3b","#31744b","#245e3b"};
-  if(charging){rect(x+2,y+2,42,16,"",pulse_bg[charge_frame%CHARGE_FRAMES]);fill=pulse_fill[charge_frame%CHARGE_FRAMES];}
-  rect(x+2,y+2,42*percent/100,16,"",fill);
+  int known=data.battery>=0,charging=known&&data.charging==1;
+  const char *outline=known?"#ffffff":"#9aa1ac";
+  /* A pale empty track keeps dark numerals readable over both the track and
+   * green fill. At zero, pulse the track instead of inventing stored charge. */
+  static const char *const pulse_green[]={"#54e391","#40d67e","#2dc46c","#40d67e"};
+  static const char *const pulse_empty[]={"#ffffff","#e7e7e7","#cfcfcf","#e7e7e7"};
+  rect(x+2,y+2,26,13,"",!known?"#262b32":charging&&!percent?pulse_empty[charge_frame%CHARGE_FRAMES]:"#ffffff");
+  int filled=26*percent/100;
+  if(filled)rect(x+2,y+2,filled,13,"",charging?pulse_green[charge_frame%CHARGE_FRAMES]:"#40d67e");
   /* litehtml paints the 2px border outside the declared content dimensions. */
-  add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:42px;height:16px;border:2px solid %s;border-radius:5px\"></div>",x,y,outline);
-  rect(x+47,y+6,3,8,"",outline);
-  char label[24];if(data.battery<0)snprintf(label,sizeof(label),"--%%");
-  else snprintf(label,sizeof(label),"%d%%",percent);
-  box(x+4,y,38,20,"head center",label);
+  add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:26px;height:13px;border:2px solid %s;border-radius:3px\"></div>",x,y,outline);
+  rect(x+31,y+5,2,7,"",outline);
+  char label[24];if(data.battery<0)snprintf(label,sizeof(label),"--");
+  else snprintf(label,sizeof(label),"%d",percent);
+  add("<div id=\"battery-level\" class=\"box head center status-text\" style=\"left:%dpx;top:%dpx;width:24px;height:13px;font-size:10px;line-height:13px;color:%s\">",x+3,y+2,known?"#101216":"#e8eaee");
+  escaped(label);add("</div>");
+}
+/* Small stepped curves, so Wi-Fi resembles the reference at 320 x 480. */
+static void status_wifi(int x,int y,int active) {
+  const char *arc=active?"#808080":"#3a414b",*dot_color=active?"#ffffff":"#3a414b";
+  rect(x+5,y,10,2,"",arc);rect(x+3,y+2,4,2,"",arc);rect(x+13,y+2,4,2,"",arc);
+  rect(x+1,y+4,5,2,"",arc);rect(x+16,y+4,5,2,"",arc);
+  rect(x+6,y+5,8,2,"",arc);rect(x+4,y+7,4,2,"",arc);rect(x+12,y+7,4,2,"",arc);
+  rect(x+9,y+13,2,1,"",dot_color);rect(x+8,y+14,4,2,"",dot_color);
+}
+static void status_charge_bolt(int x,int y) {
+  add("<div id=\"charging-bolt\" class=\"box\" style=\"left:%dpx;top:%dpx;width:10px;height:15px\">",x,y);
+  const char *c="#ffffff";
+  rect(6,0,3,2,"",c);rect(5,2,3,1,"",c);rect(4,3,3,1,"",c);rect(3,4,3,1,"",c);
+  rect(2,5,6,1,"",c);rect(0,6,10,1,"",c);rect(4,7,4,1,"",c);rect(3,8,4,1,"",c);
+  rect(3,9,3,1,"",c);rect(2,10,3,1,"",c);rect(2,11,2,1,"",c);rect(1,12,2,1,"",c);rect(1,13,1,1,"",c);
+  add("</div>");
+}
+/* Mudi-style status strip: local screen time, cellular signal, generation,
+ * Wi-Fi radios and the battery. Unknown status never claims a 5G connection. */
+static void status_clock(char clock[8],time_t now,int offset) {
+  struct tm local,*result=NULL;snprintf(clock,8,"--:--");
+  if(now>=1577836800) {
+    if(offset==10000)result=localtime_r(&now,&local);
+    else {now+=(time_t)offset*60;result=gmtime_r(&now,&local);}
+    if(result)strftime(clock,8,"%H:%M",result);
+  }
+}
+static const char *status_radio(const char *radio,int has_sim) {
+  if(!has_sim)return "--";
+  if(!strcasecmp(radio,"SA")||!strcasecmp(radio,"NSA")||!strcasecmp(radio,"ENDC")||
+     strcasestr(radio,"5g")||strcasestr(radio,"nr"))return "5G";
+  if(strcasestr(radio,"4g")||strcasestr(radio,"lte"))return "4G";
+  if(strcasestr(radio,"3g"))return "3G";
+  return "--";
+}
+static void top_status(void) {
+  char clock[8];status_clock(clock,time(NULL),settings_clock_offset);
+  rect(0,0,W,40,"","#000000");
+  add("<div class=\"box head status-text\" style=\"left:10px;top:7px;width:72px;height:24px;font-size:18px;line-height:24px;color:#ffffff\">");
+  escaped(clock);add("</div>");
+  const struct toolbox_info *tb=&data.toolbox;
+  int known=tb->has&&!stale(),has_sim=known&&tb->sim!=0;
+  long long strength=has_sim?tb->rsrp:NO_FIGURE;
+  int lit=strength==NO_FIGURE?0:strength>=-85?4:strength>=-95?3:strength>=-105?2:strength>=-115?1:0;
+  /* The reference reserves space for the charging bolt; otherwise the group
+   * shifts right to keep the battery aligned with the screen edge. */
+  int plugged=data.charging==1||data.charging==2,shift=plugged?0:16;
+  const int heights[]={6,9,14,16},widths[]={5,5,5,3};
+  for(int i=0;i<4;i++)add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx;border-radius:1px;background:%s\"></div>",
+      182+shift+i*7,27-heights[i],widths[i],heights[i],i<lit?"#ffffff":"#3a414b");
+  const char *radio=status_radio(tb->radio,has_sim);
+  add("<div class=\"box head status-text\" style=\"left:%dpx;top:7px;width:22px;height:24px;font-size:18px;line-height:24px;color:%s\">",210+shift,strcmp(radio,"--")?"#ffffff":"#9aa1ac");
+  escaped(radio);add("</div>");
+  status_wifi(235+shift,10,known&&(tb->wifi_2g_on||tb->wifi_5g_on));
+  header_battery(262+shift,10);
+  if(plugged)status_charge_bolt(300,11);
 }
 /* Label, right-aligned value and an optional usage bar (percent < 0: no bar). */
 static void stat_row(int y, const char *label, const char *value, double percent) {
@@ -256,6 +313,7 @@ static void dialog_card(int y, int h) {
 static const char *menu_title(int p, int tile) {
   switch(p) {
   case OVERVIEW: return L("Overview","概览");
+  case STOCK_MENU: return L("Stock UI","原生主题");
   case PROXY: return L("Proxy","代理");
   case WG: return "WireGuard";
   case CLASH: return "Clash";
@@ -275,6 +333,7 @@ static const char *menu_title(int p, int tile) {
 static const char *menu_icon(int p) {
   switch(p) {
   case OVERVIEW: return "&#9673;";      /* ◉ */
+  case STOCK_MENU: return "&#8962;";   /* ⌂ */
   case PROXY: return "&#8644;";         /* ⇄ */
   case WG: return "&#9919;";            /* ⚿ */
   case CLASH: return "&#10022;";        /* ✦ */
@@ -317,6 +376,7 @@ static void tile_state(int p, char *buf, size_t n, const char **cls) {
   const struct backend_info *bk=&data.backend;
   *cls="muted";
   switch(p) {
+  case STOCK_MENU: buf[0]=0; return;
   case OVERVIEW: snprintf(buf,n,"CPU %.0f%%",data.cpu); return;
   case PROXY:
     *cls=bk->has?proxy_class():"muted";
@@ -333,6 +393,7 @@ static void tile_state(int p, char *buf, size_t n, const char **cls) {
     return;
   case UPLINK: *cls=uplink_class(); snprintf(buf,n,"%s",data.uplink.has?uplink_state_text(data.uplink.state):"--"); return;
   case WIFI_PAGE:
+    if(!h->has){snprintf(buf,n,"--");return;}
     if(!h->wifi_2g_on&&!h->wifi_5g_on){*cls="warn";snprintf(buf,n,"%s",L("Off","已关闭"));}
     else snprintf(buf,n,L("%llu online","%llu 台在线"),h->wifi_clients);
     return;
@@ -345,6 +406,7 @@ static void tile_state(int p, char *buf, size_t n, const char **cls) {
     else snprintf(buf,n,"%s",h->usb_mode[0]?h->usb_mode:"--");
     return;
   case POWER_PAGE:
+    if(!h->has){snprintf(buf,n,"--");return;}
     if(!h->chg_enabled){*cls="warn";snprintf(buf,n,"%s",L("Paused","已停充"));}
     else if(h->chg_limit_on)snprintf(buf,n,L("Limit %llu%%","上限 %llu%%"),h->chg_stop);
     else if(data.battery>=0)snprintf(buf,n,"%d%%",data.battery);
@@ -364,6 +426,53 @@ static void menu_rate(char *out,size_t n,unsigned long long kbps) {
   else if(kbps>=10000ULL)snprintf(out,n,"%lluM",kbps/1000ULL);
   else if(kbps>=1000ULL)snprintf(out,n,"%llu.%lluM",kbps/1000ULL,(kbps/100ULL)%10);
   else snprintf(out,n,"%lluK",kbps);
+}
+/* The saved order is shared by the dashboard shortcuts and the complete grid. */
+static const int menu_pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,SMS_PAGE,PROFILES,DEVICES,STOCK_MENU};
+static const char *const menu_ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","sms","profiles","devices","stock"};
+#define MENU_COUNT ((int)(sizeof(menu_pages)/sizeof(menu_pages[0])))
+static int ordered_menu(int *indices) {
+  int count=0;
+  if(settings_order_count) {
+    for(int r=0;r<settings_order_count;r++)
+      for(int i=0;i<MENU_COUNT;i++)
+        if(menu_pages[i]==settings_order[r]&&visible_page(menu_pages[i]))indices[count++]=i;
+    if(!settings_native_menu)indices[count++]=MENU_COUNT-1;
+  } else {
+    for(int i=0;i<MENU_COUNT;i++)if(visible_page(menu_pages[i]))indices[count++]=i;
+  }
+  return count;
+}
+/* Only actual telemetry is shown. No data allowance or connection state is guessed. */
+static void dashboard_network(void) {
+  const struct toolbox_info *tb=&data.toolbox;
+  int known=tb->has&&!stale();
+  char down[24]="--",up[24]="--",label[48];
+  if(known){menu_rate(down,sizeof(down),tb->kbps_down);menu_rate(up,sizeof(up),tb->kbps_up);}
+  add("<div class=\"box card\" style=\"left:10px;top:54px;width:300px;height:108px\"></div>");
+  sbox(22,65,188,20,"head",known&&tb->sim==0?L("No SIM","无 SIM 卡"):
+       known&&tb->carrier[0]?tb->carrier:L("Mobile network","移动网络"));
+  sbox(222,65,72,20,"head right",known&&tb->sim!=0&&tb->radio[0]&&strcmp(tb->radio,"-")?tb->radio:"--");
+  box(22,93,130,20,"muted",L("Download","下载"));box(171,93,120,20,"muted",L("Upload","上传"));
+  snprintf(label,sizeof(label),"↓ %s%s",down,known?"b/s":"");box(22,119,134,22,"head",label);
+  snprintf(label,sizeof(label),"↑ %s%s",up,known?"b/s":"");box(171,119,125,22,"head",label);
+}
+static void dashboard_tile(int index,int slot) {
+  int p=menu_pages[index],x=10+(slot%2)*155,y=172+(slot/2)*106;
+  char state[96];const char *cls="muted";
+  tile_state(p,state,sizeof(state),&cls);
+  if(p==SMS_PAGE)state[0]=0;
+  if(p==OVERVIEW) {
+    char down[24]="--",up[24]="--";
+    if(data.toolbox.has&&!stale()){menu_rate(down,sizeof(down),data.toolbox.kbps_down);menu_rate(up,sizeof(up),data.toolbox.kbps_up);}
+    if(data.stamp&&data.cpu>=0)snprintf(state,sizeof(state),"CPU%.0f%% ↓%s ↑%s",data.cpu,down,up);
+    else snprintf(state,sizeof(state),"CPU-- ↓%s ↑%s",down,up);
+  }
+  add("<a id=\"%s\" href=\"act:%s\" class=\"box tile\" style=\"left:%dpx;top:%dpx;width:145px;height:96px\">",menu_ids[index],menu_ids[index],x,y);
+  add("<div class=\"box center\" style=\"left:8px;top:3px;width:129px;height:38px;font-size:32px;line-height:38px\">%s</div>",menu_icon(p));
+  add("<div class=\"box head center\" style=\"left:5px;top:43px;width:135px;height:20px\">");shortened(menu_title(p,1),135,16);add("</div>");
+  add("<div class=\"box %s center\" style=\"left:5px;top:68px;width:135px;height:20px;font-size:%dpx\">",cls,p==OVERVIEW?12:16);
+  shortened(state,135,p==OVERVIEW?12:16);add("</div></a>");
 }
 /* The menu's Overview entry carries live CPU and both network directions. */
 static void menu_overview(int x,int y,int tile) {
@@ -428,67 +537,56 @@ static void build_html(void) {
       /* WireGuard pages go back to WireGuard; the others reload where they are. */
       linkbox(24,284,272,56,"refresh",page==WG||page==PROFILES||page==DEVICES?L("Refresh and back","刷新并返回"):L("Refresh","刷新"),1,PRIMARY);
     }
-  } else if(page==MENU) {
-    box(8,14,72,32,"title","OpenUI");
-    /* A compact visible control with a full-size hit target. */
-    add("<a id=\"stock\" href=\"act:stock\" class=\"box\" style=\"left:80px;top:4px;width:96px;height:48px\">");
-    add("<div class=\"box btn\" style=\"left:8px;top:10px;width:80px;height:28px;line-height:26px\">");
-    shortened(L("Stock UI","原生主题"),72,16);add("</div></a>");
-    const struct toolbox_info *tb=&data.toolbox;
-    /* Power and signal remain visible in the upper right, including when data is stale. */
-    header_battery(240,18);
-    long long signal_r=tb->has&&tb->sim!=0?tb->rsrp:NO_FIGURE;
-    int lit=signal_r==NO_FIGURE?0:signal_r>=-85?4:signal_r>=-95?3:signal_r>=-105?2:signal_r>=-115?1:0;
-    const char *signal_tone=tone_color(signal_r>-95?"good":signal_r>-110?"warn":"bad");
-    for(int i=0;i<4;i++)rect(294+i*5,20+(3-i)*3,3,6+i*3,"",i<lit?signal_tone:"#323a47");
-    const int pages[] = {OVERVIEW,UPLINK,PROXY,WG,CLASH,ESIM,WIFI_PAGE,SIGNAL_PAGE,USB_PAGE,POWER_PAGE,BOOSTER_PAGE,TAILSCALE,SMS_PAGE,PROFILES,DEVICES};
-    const char *ids[] = {"overview","uplink","proxy","wireguard","clash","esim","wifi","signal","usb","power","booster","tailscale","sms","profiles","devices"};
-    int vis_idx[15], vis_cnt=0;
-    if(settings_order_count) {
-      for(int r=0;r<settings_order_count;r++)
-        for(int i=0;i<15;i++) if(pages[i]==settings_order[r] && visible_page(pages[i])) vis_idx[vis_cnt++]=i;
-    } else {
-      for(int i=0;i<15;i++) if(visible_page(pages[i])) vis_idx[vis_cnt++]=i;
+  } else if(page==MENU||page==DASHBOARD) {
+    top_status();
+    if(page==MENU) {
+      add("<a id=\"back\" href=\"act:back\" class=\"box center head\" style=\"left:4px;top:42px;width:48px;height:48px;line-height:48px;font-size:24px\">&#8592;</a>");
+      box(56,50,208,32,"title center",L("More","更多"));
     }
+    int vis_idx[MENU_COUNT],vis_cnt=ordered_menu(vis_idx);
+    if(page==DASHBOARD) {
+      dashboard_network();
+      for(int i=0;i<vis_cnt&&i<4;i++)dashboard_tile(vis_idx[i],i);
+      add("<a id=\"more\" href=\"act:more\" class=\"box tile\" style=\"left:10px;top:390px;width:300px;height:56px\">");
+      for(int row=0;row<3;row++)for(int col=0;col<3;col++)rect(118+col*7,18+row*7,5,5,"","#e8eaee");
+      add("<div class=\"box head\" style=\"left:149px;top:17px;width:130px;height:22px\">");
+      escaped(L("More","更多"));add("</div></a>");
+    } else {
     /* Always match the web editor's three-column grid. Six rows fit above the
      * footer while keeping each touch target at least 48px high. */
     for(int r=0;r<vis_cnt&&r<18;r++) {
-      int i=vis_idx[r],x=10+(r%3)*102,y=68+(r/3)*50;
-      if(pages[i]==OVERVIEW){menu_overview(x,y,1);continue;}
+      int i=vis_idx[r],x=10+(r%3)*102,y=98+(r/3)*50;
+      if(menu_pages[i]==OVERVIEW){menu_overview(x,y,1);continue;}
       const char *scls="muted";
-      tile_state(pages[i],tmp,sizeof(tmp),&scls);
-      add("<a id=\"%s\" href=\"act:%s\" class=\"box\" style=\"left:%dpx;top:%dpx;width:96px;height:48px\">",ids[i],ids[i],x,y);
+      tile_state(menu_pages[i],tmp,sizeof(tmp),&scls);
+      add("<a id=\"%s\" href=\"act:%s\" class=\"box\" style=\"left:%dpx;top:%dpx;width:96px;height:48px\">",menu_ids[i],menu_ids[i],x,y);
       add("<div class=\"box tile\" style=\"left:3px;top:2px;width:90px;height:44px\">");
-      add("<div class=\"box head\" style=\"left:6px;top:1px;width:78px;height:20px\">");shortened(menu_title(pages[i],1),78,16);
+      add("<div class=\"box head\" style=\"left:6px;top:1px;width:78px;height:20px\">");shortened(menu_title(menu_pages[i],1),78,16);
       add("</div><div class=\"box %s\" style=\"left:6px;top:21px;width:78px;height:20px\">",scls);shortened(tmp,78,16);add("</div></div></a>");
     }
-    box(16,424,292,20,"muted",L("Power: tap to sleep, hold for menu.","电源键：短按息屏，长按关机或重启"));
-    if(settings_sleep) snprintf(tmp,sizeof(tmp),L("Screen turns off after %d s idle.","空闲 %d 秒后熄屏"),settings_idle);
-    else snprintf(tmp,sizeof(tmp),L("Stock UI returns after %d s idle.","空闲 %d 秒后返回原厂界面"),settings_idle);
-    box(16,446,292,20,"faint",tmp);
+    }
   } else if(page==WG) {
     header("WireGuard");
-    add("<div class=\"box card\" style=\"left:12px;top:76px;width:296px;height:92px\"></div>");
-    dot(28,91,summary_color());
+    add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:68px\"></div>");
+    dot(28,87,summary_color());
     snprintf(tmp,sizeof(tmp),"head %s",strcmp(summary_class(),"muted")?summary_class():"");
-    box(46,86,250,20,tmp,summary());
+    box(46,82,250,20,tmp,summary());
     if(!data.has)snprintf(tmp,sizeof(tmp),"%s",L("Import a config in OpenUI","请先在 OpenUI 中导入配置"));
     else if(data.enabled&&data.handshake)snprintf(tmp,sizeof(tmp),L("Last handshake: %llu s ago","上次握手：%llu 秒前"),(unsigned long long)time(NULL)>data.handshake?(unsigned long long)time(NULL)-data.handshake:0);
     else snprintf(tmp,sizeof(tmp),"%s",data.enabled?L("Waiting for the server","正在等待服务器响应"):L("Devices use normal internet","设备使用普通网络"));
-    box(28,112,268,20,"muted",tmp);
-    box(28,136,268,20,"muted",L("Internet access not verified","未验证互联网连通性"));
+    box(28,108,268,20,"muted",tmp);
     amount(rx,sizeof(rx),data.rx);amount(tx,sizeof(tx),data.tx);
-    add("<div class=\"box card\" style=\"left:12px;top:180px;width:142px;height:64px\"></div><div class=\"box card\" style=\"left:166px;top:180px;width:142px;height:64px\"></div>");
-    box(26,188,120,20,"muted",L("↓ Downloaded","↓ 下载"));box(180,188,120,20,"muted",L("↑ Uploaded","↑ 上传"));
-    box(26,208,124,32,"title",rx);box(180,208,124,32,"title",tx);
-    linkbox(12,256,296,56,"toggle",data.enabled?L("Disable WireGuard","关闭 WireGuard"):
+    add("<div class=\"box card\" style=\"left:12px;top:150px;width:142px;height:64px\"></div><div class=\"box card\" style=\"left:166px;top:150px;width:142px;height:64px\"></div>");
+    box(26,158,120,20,"muted",L("↓ Downloaded","↓ 下载"));box(180,158,120,20,"muted",L("↑ Uploaded","↑ 上传"));
+    box(26,178,124,32,"title",rx);box(180,178,124,32,"title",tx);
+    linkbox(12,222,296,56,"toggle",data.enabled?L("Disable WireGuard","关闭 WireGuard"):
             data.backend.has&&data.backend.active==BK_CLASH?L("Switch to WireGuard","切换到 WireGuard"):L("Enable WireGuard","开启 WireGuard"),
             !blocked()&&data.has,data.enabled?DANGER:PRIMARY);
-    value_row(12,324,296,50,"profiles",L("Profile","当前配置"),active_profile(),reachable(PROFILES));
+    value_row(12,284,296,50,"profiles",L("Profile","当前配置"),active_profile(),reachable(PROFILES));
     snprintf(tmp,sizeof(tmp),"%d / %d",selected_count(),data.n);
-    value_row(12,382,296,50,"devices",L("Device routing","设备分流"),tmp,reachable(DEVICES));
-    if(notice[0])box(16,446,292,20,"bad",notice);
-    else box(16,446,292,20,"muted",data.all?L("New devices: WireGuard","新设备：走 WireGuard"):L("New devices: normal network","新设备：走普通网络"));
+    value_row(12,340,296,50,"devices",L("Device routing","设备分流"),tmp,reachable(DEVICES));
+    if(notice[0])box(16,402,292,20,"bad",notice);
+    else box(16,402,292,20,"muted",data.all?L("New devices: WireGuard","新设备：走 WireGuard"):L("New devices: normal network","新设备：走普通网络"));
   } else if(page==PROFILES) {
     header(L("Saved profiles","已保存配置"));
     snprintf(tmp,sizeof(tmp),L("%d / 5 saved - tap to switch","已保存 %d / 5 个，点击切换"),data.np);
@@ -504,10 +602,6 @@ static void build_html(void) {
     }
     if(!data.np)box(28,150,264,60,"wrap muted",L("Import profiles in the OpenUI webpage first.","请先在 OpenUI 网页中导入配置。"));
     if(stale())box(16,420,292,40,"wrap bad",L("Status is stale. Controls are disabled.","状态已过期，控制已停用。"));
-    else {
-      box(16,420,292,20,"muted",L("Switching keeps device routing.","切换配置不会改变设备分流。"));
-      box(16,442,292,20,"muted",L("Manage names and keys in OpenUI.","名称与密钥请在 OpenUI 中管理。"));
-    }
   } else if(page==DEVICES) {
     header(L("Device routing","设备分流"));
     box(16,72,292,20,"muted",draft.all?L("New devices: WireGuard","新设备：走 WireGuard"):L("New devices: normal network","新设备：走普通网络"));

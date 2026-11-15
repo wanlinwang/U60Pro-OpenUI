@@ -11,7 +11,9 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_MULTIPLE_MASTERS_H
 #include "devui_font.h"
+#include "devui_status_font.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -72,8 +74,10 @@ static bool pt_in_round(int x, int y, int fx, int fy, int fw, int fh,
 /* ---- FreeType ---- */
 static FT_Library g_ft;
 static FT_Face    g_face;
+static FT_Face    g_status_face;
+static bool       g_status_bold;
 
-struct ft_font { int size; int ascent, descent, height; bool bold; };
+struct ft_font { int size; int ascent, descent, height; bool bold; FT_Face face; };
 
 /* UI base dir (for <link> CSS / images) and last-clicked anchor href. */
 static std::string g_ui_dir = "/data/plugins/u60pro-devui/ui";
@@ -255,11 +259,12 @@ public:
     uint_ptr create_font(const font_description &d, const document *, font_metrics *fm) override {
         auto *f = new ft_font();
         f->size = (int)d.size;
-        f->bold = d.weight >= 600; /* Unifont has one weight: embolden by overstriking. */
-        FT_Set_Pixel_Sizes(g_face, 0, f->size);
-        f->ascent  = g_face->size->metrics.ascender >> 6;
-        f->descent = -(g_face->size->metrics.descender >> 6);
-        f->height  = g_face->size->metrics.height >> 6;
+        f->face = d.family.find("status-sans") != std::string::npos && g_status_face ? g_status_face : g_face;
+        f->bold = d.weight >= 600 && !(f->face == g_status_face && g_status_bold);
+        FT_Set_Pixel_Sizes(f->face, 0, f->size);
+        f->ascent  = f->face->size->metrics.ascender >> 6;
+        f->descent = -(f->face->size->metrics.descender >> 6);
+        f->height  = f->face->size->metrics.height >> 6;
         if (fm) {
             fm->font_size = d.size;
             fm->ascent = f->ascent; fm->descent = f->descent;
@@ -273,26 +278,26 @@ public:
 
     pixel_t text_width(const char *text, uint_ptr h) override {
         auto *f = (ft_font *)h;
-        FT_Set_Pixel_Sizes(g_face, 0, f->size);
+        FT_Set_Pixel_Sizes(f->face, 0, f->size);
         pixel_t w = 0;
         for (const char *s = text; *s; ) {
             unsigned cp = utf8_next(s);
-            if (FT_Load_Char(g_face, cp, FT_LOAD_DEFAULT)) continue;
-            w += g_face->glyph->advance.x >> 6;
+            if (FT_Load_Char(f->face, cp, FT_LOAD_DEFAULT)) continue;
+            w += f->face->glyph->advance.x >> 6;
         }
         return w;
     }
 
     void draw_text(uint_ptr, const char *text, uint_ptr h, web_color color, const position &pos) override {
         auto *f = (ft_font *)h;
-        FT_Set_Pixel_Sizes(g_face, 0, f->size);
+        FT_Set_Pixel_Sizes(f->face, 0, f->size);
         int pen = (int)pos.x;
         int base = (int)pos.y + f->ascent;
         position cl = eff_clip();
         for (const char *s = text; *s; ) {
             unsigned cp = utf8_next(s);
-            if (FT_Load_Char(g_face, cp, FT_LOAD_RENDER)) continue;
-            FT_GlyphSlot gl = g_face->glyph;
+            if (FT_Load_Char(f->face, cp, FT_LOAD_RENDER)) continue;
+            FT_GlyphSlot gl = f->face->glyph;
             FT_Bitmap &bm = gl->bitmap;
             for (int pass = 0; pass < (f->bold ? 2 : 1); pass++) {
             int ox = pen + gl->bitmap_left + pass, oy = base - gl->bitmap_top;
@@ -399,6 +404,21 @@ extern "C" void html_view_init(uint16_t *fb, int w, int h, int pitch_px, int rot
     if (FT_Init_FreeType(&g_ft) || FT_New_Memory_Face(g_ft, devui_font, sizeof(devui_font), 0, &g_face)) {
         fprintf(stderr, "html_view: cannot load embedded OFL font\n");
         std::abort();
+    }
+    if (!FT_New_Memory_Face(g_ft, devui_status_font, sizeof(devui_status_font), 0, &g_status_face)) {
+        FT_MM_Var *axes = nullptr;
+        if (!FT_Get_MM_Var(g_status_face, &axes) && axes) {
+            std::vector<FT_Fixed> coords(axes->num_axis);
+            for (FT_UInt i=0;i<axes->num_axis;i++) {
+                coords[i]=axes->axis[i].def;
+                if (axes->axis[i].tag==FT_MAKE_TAG('w','g','h','t'))coords[i]=700L<<16;
+            }
+            g_status_bold = FT_Set_Var_Design_Coordinates(g_status_face, axes->num_axis, coords.data()) == 0;
+            FT_Done_MM_Var(g_ft, axes);
+        }
+    } else {
+        /* A status font failure must never prevent the stock screen's recovery. */
+        g_status_face=nullptr;
     }
     g_container = new fb_container();
 }

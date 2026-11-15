@@ -4,7 +4,8 @@ The menu uses the real litehtml/FreeType RGB565 renderer from
 [33333s/u60pro-devui](https://github.com/33333s/u60pro-devui), pinned at
 `d1d0856e19d58a2a98104e47afbdcfc51e1dc3d1`. The adapted renderer is in
 `vendor/html_view.cpp`; its MIT notice is preserved. It embeds an OFL Unifont
-instead of loading proprietary device fonts, and supports a macOS preview.
+instead of loading proprietary device fonts, and supports a macOS preview. A pinned
+OFL Roboto font is embedded for the status bar; the remaining UI uses Unifont.
 
 `ui/style.css` defines the appearance; sizes stay at 16/32 px (24 px for titles)
 because Unifont is a 16 px bitmap design. `render.h` writes every string as
@@ -15,6 +16,18 @@ battery badge and configurable idle return. `render.h` builds
 the dynamic pages using escaped agent data; `actions.h` accepts only fixed
 navigation, toggle, device-selection and profile-activation actions. HTML and
 font assets are embedded in the screen binary for atomic updates and rollback.
+
+The dashboard draws on the information hierarchy of the
+[Mudi 7 touchscreen](https://docs.gl-inet.com/router/en/4/user_guide/gl-e5800/):
+network status above four shortcuts and a More entry. The shortcuts are the first four
+items in the saved display order; More opens the whole configurable three-column grid.
+Native theme is a movable menu item; older settings get it as the fourth item, and the power
+menu remains a separate way to restore the stock UI. The top bar shows the configured
+screen time, cellular generation and signal, Wi-Fi status and charging battery.
+The web editor previews both, and the dashboard shows real telemetry rather than an
+invented data allowance. Live states, 48 px touch targets and action confirmations
+remain part of OpenUI. Keep operational warnings and errors visible; omit repeated
+instructions when a control or its confirmation already explains it.
 
 The existing `panel.c` keeps its Atomic double buffers, rotated MT-B touch
 handling, root-only agent socket, idle timeout and independent recovery process.

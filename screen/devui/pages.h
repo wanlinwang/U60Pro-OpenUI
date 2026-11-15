@@ -125,20 +125,18 @@ static const char *ts_ssh_detail(void) {
 static void render_tailscale(void) {
   const struct tailscale_info *t=&data.tailscale;
   header("Tailscale");
-  sbox(16,68,292,20,"head",ts_summary());
-  switch_row(12,92,296,56,"tstoggle","tstoggle","Tailscale",
-      L("Connect / disconnect","连接 / 断开"),t->enabled,!ts_blocked());
-  switch_row(12,152,296,56,"tsssh","tsssh",L("Remote SSH","远程 SSH"),ts_ssh_detail(),
+  switch_row(12,68,296,56,"tstoggle","tstoggle","Tailscale",ts_summary(),t->enabled,!ts_blocked());
+  switch_row(12,128,296,56,"tsssh","tsssh",L("Remote SSH","远程 SSH"),ts_ssh_detail(),
       t->has_ssh&&t->remote_ssh==1,!ts_blocked()&&t->has_ssh&&t->remote_ssh!=2);
-  sbox(16,212,292,20,notice[0]?"warn":"muted",notice[0]?notice:L("Status != forwarding proof; no IPv6","状态不代表转发已验证；不支持 IPv6"));
-  sbox(16,236,292,20,"head",t->selected[0]&&strcmp(t->selected,"-")?t->selected:L("No exit selected","未选择出口"));
-  linkbox(12,260,296,48,"tsclear",L("Clear exit","清除出口"),!ts_blocked()&&strcmp(t->selected,"-"),PLAIN);
+  sbox(16,190,292,20,notice[0]?"warn":"muted",notice[0]?notice:L("IPv4 only · forwarding unverified","仅 IPv4 · 转发未验证"));
+  sbox(16,214,292,20,"head",t->selected[0]&&strcmp(t->selected,"-")?t->selected:L("No exit selected","未选择出口"));
+  linkbox(12,238,296,48,"tsclear",L("Clear exit","清除出口"),!ts_blocked()&&strcmp(t->selected,"-"),PLAIN);
   if(ts_offset>=t->n)ts_offset=t->n>0?(t->n-1)/2*2:0;
   for(int i=0;i<2&&ts_offset+i<t->n;i++) {
     const struct tailscale_row *row=&t->rows[ts_offset+i];char id[12];snprintf(id,sizeof(id),"ts%d",i);
-    linkbox(12,316+52*i,296,48,id,row->name,!ts_blocked(),row->selected?CHOSEN:PLAIN);
+    linkbox(12,292+52*i,296,48,id,row->name,!ts_blocked(),row->selected?CHOSEN:PLAIN);
   }
-  if(!t->n)sbox(16,316,292,40,"wrap muted",L("No online eligible exits","没有在线可用出口"));
+  if(!t->n)sbox(16,292,292,40,"wrap muted",L("No online eligible exits","没有在线可用出口"));
   /* Leave a lower inset for the renderer's inclusive/bordered hit rectangle. */
   linkbox(12,428,140,48,"tsprev",L("Previous","上一页"),ts_offset>0,PLAIN);
   linkbox(168,428,140,48,"tsnext",L("Next","下一页"),ts_offset+2<t->n,PLAIN);
@@ -227,7 +225,7 @@ static void card_close(const char *id, int h) {
 static void footer(int y, int h, const char *hint, const char *hint_cls) {
   const char *cls=h>20?"wrap ":"";
   char c[32];
-  if(stale()){snprintf(c,sizeof(c),"%sbad",cls);box(16,y,292,h,c,L("Status is stale. Controls are disabled.","状态已过期，控制已停用。"));}
+  if(stale()){snprintf(c,sizeof(c),"%sbad",cls);box(16,y,292,h,c,L("Stale; controls disabled","状态已过期，控制已停用"));}
   else if(notice[0]){snprintf(c,sizeof(c),"%sbad",cls);box(16,y,292,h,c,notice);}
   else if(hint&&hint[0]){snprintf(c,sizeof(c),"%s%s",cls,hint_cls);box(16,y,292,h,c,hint);}
 }
@@ -235,23 +233,21 @@ static void render_proxy(void) {
   const struct backend_info *b=&data.backend;
   char tmp[256],rx[32],tx[32];
   header(L("Proxy","代理"));
-  box(16,72,292,20,"muted",L("How devices reach the internet","设备的上网方式"));
   const char *labels[3]={L("Off","关闭"),"WireGuard","Clash"};
   /* With both saved as on, every choice resolves the conflict, so none is shown as chosen. */
   for(int i=0;i<3;i++) {
     char id[8];snprintf(id,sizeof(id),"bk%d",i);
     int on=b->has&&b->active==i&&!b->conflict;
-    linkbox(12+100*i,96,96,56,id,labels[i],b->has&&!blocked()&&!on&&(i==BK_OFF||b->ready[i-1]),on?CHOSEN:PLAIN);
+    linkbox(12+100*i,70,96,56,id,labels[i],b->has&&!blocked()&&!on&&(i==BK_OFF||b->ready[i-1]),on?CHOSEN:PLAIN);
   }
   int lines=0;
   for(int i=0;i<2&&b->has;i++) if(!b->ready[i]&&b->active!=i+1) {
     snprintf(tmp,sizeof(tmp),"%s: %s",i?"Clash":"WireGuard",reason_text(b->reason[i]));
-    sbox(16,160+22*lines++,292,20,"warn",tmp);
+    sbox(16,130+22*lines++,292,20,"warn",tmp);
   }
-  if(!lines)box(16,160,292,20,"muted",L("Switching asks for confirmation.","切换前会请求确认。"));
   int target=b->active==BK_WG?WG:b->active==BK_CLASH?CLASH:b->active==BK_TS?TAILSCALE:-1;
   const char *link=b->has&&target>=0&&reachable(target)?"active":NULL;
-  card_open(12,208,296,124,link);
+  card_open(12,180,296,124,link);
   const char *cls=proxy_class();
   dot(16,15,tone_color(cls));
   snprintf(tmp,sizeof(tmp),"%s: %s",b->has&&b->active==BK_WG?"WireGuard":b->has&&b->active==BK_CLASH?"Clash":b->has&&b->active==BK_TS?"Tailscale":L("Proxy","代理"),proxy_summary());
@@ -274,18 +270,17 @@ static void render_proxy(void) {
     if(data.clash.error[0])sbox(16,80,252,20,"bad",data.clash.error);
   } else if(b->has&&b->active==BK_TS) {
     sbox(16,36,252,20,"muted",data.tailscale.selected);
-    box(16,58,252,40,"wrap warn",L("Status is not forwarding proof. IPv6 unsupported.","状态不代表转发已验证；不支持 IPv6。"));
+    box(16,58,252,20,"warn",L("IPv4 only · forwarding unverified","仅 IPv4 · 转发未验证"));
   } else if(b->has) {
     box(16,36,252,20,"muted",L("Devices use the normal network.","设备使用普通网络。"));
-    box(16,58,252,20,"muted",L("Choose WireGuard or Clash above.","可在上方选择 WireGuard 或 Clash。"));
   }
   if(b->has&&b->conflict)sbox(16,100,252,20,"warn",L("Backend conflict; choose a mode.","后端冲突，请重新选择模式。"));
   else if(b->has&&b->alongside)sbox(16,100,252,20,"muted",L("Tailscale also on (no exit node)","Tailscale 同时在线（无出口）"));
   card_close(link,124);
   const char *dcls;const char *detail=diag_summary(&dcls);
-  nav_row(12,344,296,52,"tailscale","Tailscale",ts_summary(),"warn",reachable(TAILSCALE));
-  nav_row(12,404,296,48,"diag",L("Diagnostics","诊断"),detail,dcls,reachable(DIAG));
-  footer(458,20,L("One active backend at a time","同一时间仅一个后端"),"muted");
+  nav_row(12,312,296,52,"tailscale","Tailscale",ts_summary(),"warn",reachable(TAILSCALE));
+  nav_row(12,370,296,48,"diag",L("Diagnostics","诊断"),detail,dcls,reachable(DIAG));
+  footer(430,20,"","muted");
 }
 static void render_clash(void) {
   const struct clash_info *c=&data.clash;
@@ -320,9 +315,9 @@ static void render_clash(void) {
     int on=c->has&&!strcmp(c->mode,modes[i]);
     linkbox(12+100*i,196,96,48,id,mode_text(modes[i]),c->has&&!blocked()&&!on,on?CHOSEN:PLAIN);
   }
-  nav_row(12,248,296,48,"nodes",L("Nodes","节点"),c->running?L("Groups, nodes and delay tests","分组、节点与测速"):
+  nav_row(12,248,296,48,"nodes",L("Nodes","节点"),c->running?L("Select / test","选择与测速"):
           L("Available while Clash runs","Clash 运行时可用"),"",c->running&&reachable(NODES));
-  if(data.nsubs)snprintf(tmp,sizeof(tmp),L("%d saved · switch or update","已保存 %d 个 · 切换或更新"),data.nsubs);
+  if(data.nsubs)snprintf(tmp,sizeof(tmp),L("%d saved","已保存 %d 个"),data.nsubs);
   else snprintf(tmp,sizeof(tmp),"%s",L("Add subscriptions in OpenUI","请在 OpenUI 添加订阅"));
   nav_row(12,300,296,48,"subs",L("Subscriptions","订阅"),tmp,"",reachable(SUBS));
   const struct core_info *k=&data.core;
@@ -340,9 +335,9 @@ static void render_clash(void) {
 }
 static const char *mode_hint(void) {
   const char *m=data.clash.mode;
-  return !strcmp(m,"global")?L("Global mode: only GLOBAL decides.","全局模式：仅 GLOBAL 分组生效。"):
-    !strcmp(m,"direct")?L("Direct mode: node choices are kept but unused.","直连模式：节点选择保留但不生效。"):
-    L("Rule mode: sites follow the profile's rules.","规则模式：按配置规则分流。");
+  return !strcmp(m,"global")?L("Global: GLOBAL group only","全局：仅 GLOBAL 分组生效"):
+    !strcmp(m,"direct")?L("Direct: nodes are not used","直连：节点暂不生效"):
+    L("Rule: follow profile rules","规则：按配置分流");
 }
 static void render_nodes(void) {
   char tmp[512];
@@ -362,7 +357,7 @@ static void render_nodes(void) {
   linkbox(12,316,100,48,"prev",L("‹ Prev","‹ 上页"),groups.state==1&&group_offset>0,PLAIN);
   linkbox(208,316,100,48,"next",L("Next ›","下页 ›"),groups.state==1&&group_offset+4<groups.total,PLAIN);
   snprintf(tmp,sizeof(tmp),"%d / %d",group_offset/4+1,groups.total?(groups.total+3)/4:1);box(112,330,96,20,"muted center",tmp);
-  footer(376,60,mode_hint(),"muted");
+  footer(376,20,mode_hint(),"muted");
 }
 static void render_group(void) {
   char tmp[512],d[24];
@@ -412,8 +407,7 @@ static void render_subs(void) {
     add("<div class=\"box %s\" style=\"left:14px;top:25px;width:236px;height:20px\">",stale()?"":cls);shortened(tmp,236,16);add("</div></a>");
   }
   if(!data.nsubs)box(28,150,264,60,"wrap muted",L("Add subscriptions in the OpenUI webpage first.","请先在 OpenUI 网页中添加订阅。"));
-  footer(370,60,pending&&pending_kind==JOB_REFRESH?L("Updating the subscription...","正在更新订阅..."):
-         L("Adding and editing stay in OpenUI.","添加与编辑请在 OpenUI 中进行。"),pending?"warn":"muted");
+  footer(370,20,pending&&pending_kind==JOB_REFRESH?L("Updating the subscription...","正在更新订阅..."):"",pending?"warn":"muted");
 }
 static void render_sub_dialog(void) {
   const struct sub_info *s=NULL;
@@ -510,7 +504,7 @@ static void render_core(void) {
   linkbox(166,252,142,48,"cupdate",L("Update core","更新内核"),core_update_ok(),PRIMARY);
   linkbox(12,304,142,48,"crollback",L("Roll back","回滚"),idle&&c->previous[0],DANGER);
   linkbox(166,304,142,48,"cgeo",L("Update GEO","更新 GEO"),idle,PLAIN);
-  footer(364,84,L("New files are verified and test-run first; a running core restarts.","新文件会先校验并试运行；运行中的内核会重启。"),"muted");
+  footer(364,20,"","muted");
 }
 static const char *check_name(const char *id) {
   static const struct { const char *id, *en, *zh; } names[] = {
@@ -584,9 +578,9 @@ static void render_cfopt(void) {
   switch_row(12,156,296,56,"cfauto","cfauto",L("Auto optimize","自动优选"),tmp,c->has&&c->enabled,c->has&&!blocked());
   linkbox(12,220,296,56,"cfrun",c->running||(pending&&pending_kind==JOB_CFOPT)?L("Optimizing, about 1 min","正在优选，约 1 分钟"):
           L("Optimize now","立即优选"),cfopt_can_run(),PRIMARY);
-  box(28,288,264,124,"wrap muted",L("Tests about 260 Cloudflare addresses from here and points nodes behind Cloudflare at the fastest. The domain stays as a fallback. About 6 MB per run.",
-      "测试约 260 个 Cloudflare 地址，让经过 Cloudflare 的节点使用最快的一个，原域名保留为备用。每次约 6 MB 流量。"));
-  footer(418,40,notice[0]?"":L("Interval and speed test: OpenUI → Proxy → Clash","间隔与测速设置：OpenUI → 代理 → Clash"),"muted");
+  box(28,288,264,44,"wrap muted",L("~260 addresses · ~6 MB/run. Original domain is the fallback.",
+      "约 260 个地址 · 每次约 6 MB；原域名备用。"));
+  footer(342,20,"","muted");
 }
 static void render_diag(void) {
   const struct diag_info *d=&data.diag;
@@ -609,7 +603,7 @@ static void render_diag(void) {
     check_detail(tmp,sizeof(tmp),c);sbox(14,26,268,20,"muted",tmp);
     add("</div>");
   }
-  if(d->has&&!d->n&&!d->running)box(28,240,264,60,"wrap muted center",L("Checks clock, core, DNS, nodes, web access, devices, routing and firewall.","检查时钟、内核、DNS、节点、外网访问、设备、路由与防火墙。"));
+  if(d->has&&!d->n&&!d->running)box(28,240,264,40,"wrap muted center",L("No results yet","暂无诊断结果"));
   linkbox(12,404,100,48,"prev",L("‹ Prev","‹ 上页"),diag_offset>0,PLAIN);
   linkbox(208,404,100,48,"next",L("Next ›","下页 ›"),diag_offset+4<d->n,PLAIN);
   snprintf(tmp,sizeof(tmp),"%d / %d",diag_offset/4+1,d->n?(d->n+3)/4:1);box(112,418,96,20,"muted center",tmp);
@@ -673,12 +667,12 @@ static void render_esim(void) {
   const struct esim_info *e=&data.esim;
   char tmp[256];
   header("eSIM");
-  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:68px\"></div>");
+  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:48px\"></div>");
   const char *cls,*card=esim_card_text(e,&cls);
   if(!strcmp(e->card,"euicc"))snprintf(tmp,sizeof(tmp),L("%s · %d profiles","%s · %d 个配置文件"),card,e->total);
   else snprintf(tmp,sizeof(tmp),"%s",card);
   char c[24];snprintf(c,sizeof(c),"head %s",cls);
-  sbox(28,78,268,20,c,tmp);
+  sbox(28,76,268,20,c,tmp);
   /* The running or last job, or what to do. */
   int running=!strcmp(e->state,"running");
   const char *line_cls="muted";
@@ -687,15 +681,15 @@ static void render_esim(void) {
   else if(!strcmp(e->state,"failed")&&e->error[0]){snprintf(tmp,sizeof(tmp),"%s",esim_error_text(e->error));line_cls="bad";}
   else if(!strcmp(e->card,"error")&&e->error[0]){snprintf(tmp,sizeof(tmp),"%s",esim_error_text(e->error));line_cls="bad";}
   else if(!strcmp(e->state,"done")&&!strcmp(e->kind,"enable")&&e->firmware_ready==1){snprintf(tmp,sizeof(tmp),"%s",L("Switched. Mobile data reconnects shortly.","已切换，移动数据稍后恢复。"));line_cls="good";}
-  else if(!strcmp(e->card,"euicc"))snprintf(tmp,sizeof(tmp),"%s",e->n?L("Tap a profile to switch to it.","点击配置文件即可切换。"):L("Add profiles in OpenUI.","请在 OpenUI 中添加配置文件。"));
+  else if(!strcmp(e->card,"euicc"))snprintf(tmp,sizeof(tmp),"%s",e->n?"":L("Add profiles in OpenUI.","请在 OpenUI 中添加配置文件。"));
   else if(!strcmp(e->card,"sim"))snprintf(tmp,sizeof(tmp),"%s",L("Profiles need an eUICC card.","配置文件需要 eUICC 卡。"));
   else tmp[0]=0;
-  sbox(28,104,268,20,line_cls,tmp);
+  sbox(28,98,268,20,line_cls,tmp);
   for(int i=0;i<4&&esim_offset+i<e->n;i++) {
     const struct esim_row *r=&e->rows[esim_offset+i];
     char id[8];snprintf(id,sizeof(id),"e%d",i);
     int on=r->enabled;
-    open_row(12,148+52*i,296,48,id,!on&&esim_idle(),on?"current":"");
+    open_row(12,128+52*i,296,48,id,!on&&esim_idle(),on?"current":"");
     add("<div class=\"box head\" style=\"left:14px;top:3px;width:%dpx;height:20px\">",on?200:236);shortened(r->name[0]?r->name:"?",on?200:236,16);add("</div>");
     if(on)add("<div class=\"box badge\" style=\"right:12px;top:12px;width:56px;height:22px\">%s</div>",L("Active","当前"));
     else chevron(48);
@@ -703,12 +697,12 @@ static void render_esim(void) {
     add("<div class=\"box muted\" style=\"left:14px;top:25px;width:236px;height:20px\">");shortened(tmp,236,16);add("</div></a>");
   }
   if(e->n>4) {
-    linkbox(12,358,100,48,"prev",L("‹ Prev","‹ 上页"),esim_offset>0,PLAIN);
-    linkbox(208,358,100,48,"next",L("Next ›","下页 ›"),esim_offset+4<e->n,PLAIN);
-    snprintf(tmp,sizeof(tmp),"%d / %d",esim_offset/4+1,(e->n+3)/4);box(112,372,96,20,"muted center",tmp);
-  } else footer(362,40,L("Download, rename and delete in OpenUI.","下载、改名和删除请在 OpenUI 中进行。"),"muted");
-  linkbox(12,412,142,48,"escan",running&&!strcmp(e->kind,"scan")?L("Reading","读取中"):L("Read again","重新读取"),esim_idle(),PLAIN);
-  linkbox(166,412,142,48,"ereboot",L("Restart device","重启设备"),e->reboot&&!blocked(),DANGER);
+    linkbox(12,338,100,48,"prev",L("‹ Prev","‹ 上页"),esim_offset>0,PLAIN);
+    linkbox(208,338,100,48,"next",L("Next ›","下页 ›"),esim_offset+4<e->n,PLAIN);
+    snprintf(tmp,sizeof(tmp),"%d / %d",esim_offset/4+1,(e->n+3)/4);box(112,352,96,20,"muted center",tmp);
+  } else footer(342,20,"","muted");
+  linkbox(12,392,142,48,"escan",running&&!strcmp(e->kind,"scan")?L("Reading","读取中"):L("Read again","重新读取"),esim_idle(),PLAIN);
+  linkbox(166,392,142,48,"ereboot",L("Restart device","重启设备"),e->reboot&&!blocked(),DANGER);
 }
 /* The Wi-Fi uplink switch needs fresh status, no job, and a saved network to turn on. */
 static int uplink_switch_ok(void) {
@@ -785,7 +779,7 @@ static void render_uplink(void) {
   const struct uplink_info *u=&data.uplink;
   char tmp[256],rx[32],tx[32];
   header(L("Wi-Fi relay","无线中继"));
-  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:86px\"></div>");
+  add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:56px\"></div>");
   const char *cls=uplink_class();
   dot(28,87,tone_color(cls));
   snprintf(tmp,sizeof(tmp),"head %s",strcmp(cls,"muted")?cls:"");
@@ -794,48 +788,47 @@ static void render_uplink(void) {
   const char *line=uplink_reason_text(u->reason),*line_cls="muted";
   if(!u->has)line=L("This agent has no Wi-Fi relay.","此 Agent 不支持 无线中继。");
   else if(u->state=='o')line=u->saved?L("Wi-Fi upstream is off.","Wi-Fi 上游已关闭。"):data.relay.has?L("Add a manual SSID or scan nearby.","可手动添加 SSID 或扫描附近网络。"):L("Add networks in OpenUI first.","请先在 OpenUI 中添加网络。");
-  else if(u->state=='n')line=L("Wi-Fi upstream connected.","Wi-Fi 上游已连接。");
+  else if(u->state=='n')line="";
   else if(u->state=='g')line=L("Sign in on a connected device.","请在已连接的设备上登录。");
   else if(line[0])line_cls=u->state=='u'||u->state=='i'||!strcmp(u->reason,"password")?"bad":"warn";
   else line=L("Looking for saved networks.","正在寻找已保存的网络。");
-  sbox(28,108,268,20,line_cls,line);
-  sbox(28,130,268,20,"muted",L("Routing policy: see OpenUI","分流策略请查看 OpenUI"));
-  add("<div class=\"box card\" style=\"left:12px;top:166px;width:296px;height:100px\"></div>");
-  kv_row(174,L("Network","网络"),u->ssid[0]?u->ssid:"--","");
+  sbox(28,104,268,20,line_cls,line);
+  add("<div class=\"box card\" style=\"left:12px;top:136px;width:296px;height:100px\"></div>");
+  kv_row(144,L("Network","网络"),u->ssid[0]?u->ssid:"--","");
   if(u->has_signal&&u->band[0])snprintf(tmp,sizeof(tmp),"%d dBm · %s GHz",u->signal,u->band);
   else if(u->has_signal)snprintf(tmp,sizeof(tmp),"%d dBm",u->signal);
   else snprintf(tmp,sizeof(tmp),"--");
-  kv_row(196,L("Signal","信号"),tmp,!u->has_signal?"":u->signal>=-65?"good":u->signal>=-75?"warn":"bad");
-  kv_row(218,L("Address","地址"),u->ip[0]?u->ip:"--","");
+  kv_row(166,L("Signal","信号"),tmp,!u->has_signal?"":u->signal>=-65?"good":u->signal>=-75?"warn":"bad");
+  kv_row(188,L("Address","地址"),u->ip[0]?u->ip:"--","");
   unsigned long long now=(unsigned long long)time(NULL),s=u->since&&now>u->since?now-u->since:0;
   if(!u->since||u->state!='n')snprintf(tmp,sizeof(tmp),"--");
   else if(s>=86400)snprintf(tmp,sizeof(tmp),L("%llud %lluh","%llu 天 %llu 时"),s/86400,s/3600%24);
   else if(s>=3600)snprintf(tmp,sizeof(tmp),L("%lluh %llum","%llu 时 %llu 分"),s/3600,s/60%60);
   else snprintf(tmp,sizeof(tmp),L("%llu min","%llu 分钟"),s/60);
-  kv_row(240,L("Online for","已连接"),tmp,"");
+  kv_row(210,L("Online for","已连接"),tmp,"");
   if(data.relay.has) {
-    linkbox(12,274,142,44,"rsaved",L("Saved networks","已保存网络"),1,PLAIN);
-    linkbox(166,274,142,44,"rmanual",L("Manual SSID","手动添加"),relay_ready(),PLAIN);
-    linkbox(12,326,142,44,"rdisconnect",L("Disconnect","断开连接"),relay_ready()&&u->enabled,DANGER);
-    linkbox(166,326,142,44,"rreconnect",L("Reconnect…","重新连接…"),relay_ready()&&u->saved>0,PRIMARY);
-    linkbox(12,378,142,44,"rnearby",L("Nearby / scan","附近 / 扫描"),1,PRIMARY);
-    linkbox(166,378,142,44,"ulogin",L("Start login","开始认证"),uplink_login_ok(),PLAIN);
-    relay_warning(430);return;
+    linkbox(12,244,142,44,"rsaved",L("Saved networks","已保存网络"),1,PLAIN);
+    linkbox(166,244,142,44,"rmanual",L("Manual SSID","手动添加"),relay_ready(),PLAIN);
+    linkbox(12,296,142,44,"rdisconnect",L("Disconnect","断开连接"),relay_ready()&&u->enabled,DANGER);
+    linkbox(166,296,142,44,"rreconnect",L("Reconnect…","重新连接…"),relay_ready()&&u->saved>0,PRIMARY);
+    linkbox(12,348,142,44,"rnearby",L("Nearby / scan","附近 / 扫描"),1,PRIMARY);
+    linkbox(166,348,142,44,"ulogin",L("Start login","开始认证"),uplink_login_ok(),PLAIN);
+    relay_warning(400);return;
   }
   amount(rx,sizeof(rx),u->rx);amount(tx,sizeof(tx),u->tx);
-  add("<div class=\"box card\" style=\"left:12px;top:274px;width:142px;height:62px\"></div><div class=\"box card\" style=\"left:166px;top:274px;width:142px;height:62px\"></div>");
-  box(26,280,120,20,"muted",L("↓ Downloaded","↓ 下载"));box(180,280,120,20,"muted",L("↑ Uploaded","↑ 上传"));
-  box(26,300,124,32,"title",rx);box(180,300,124,32,"title",tx);
+  add("<div class=\"box card\" style=\"left:12px;top:244px;width:142px;height:62px\"></div><div class=\"box card\" style=\"left:166px;top:244px;width:142px;height:62px\"></div>");
+  box(26,250,120,20,"muted",L("↓ Downloaded","↓ 下载"));box(180,250,120,20,"muted",L("↑ Uploaded","↑ 上传"));
+  box(26,270,124,32,"title",rx);box(180,270,124,32,"title",tx);
   /* A network that wants a web login: login mode next to the switch. */
   if(uplink_login_ok()||u->state=='g') {
-    linkbox(12,348,142,56,"ulogin",u->state=='g'?L("Logging in","认证中"):L("Start login","开始认证"),uplink_login_ok(),PRIMARY);
-    linkbox(166,348,142,56,"utoggle",uplink_applying()?L("Applying","正在应用"):L("Turn off","关闭中继"),uplink_switch_ok(),DANGER);
-    footer(416,40,L("Then open the login page on a phone or computer on this hotspot.","然后用连着本热点的手机或电脑打开登录页。"),"muted");
+    linkbox(12,318,142,56,"ulogin",u->state=='g'?L("Logging in","认证中"):L("Start login","开始认证"),uplink_login_ok(),PRIMARY);
+    linkbox(166,318,142,56,"utoggle",uplink_applying()?L("Applying","正在应用"):L("Turn off","关闭中继"),uplink_switch_ok(),DANGER);
+    footer(386,40,L("Then open the login page on a phone or computer on this hotspot.","然后用连着本热点的手机或电脑打开登录页。"),"muted");
     return;
   }
-  linkbox(12,348,296,56,"utoggle",uplink_applying()?L("Applying","正在应用"):u->enabled?L("Turn off Wi-Fi relay","关闭 无线中继"):L("Turn on Wi-Fi relay","开启 无线中继"),
+  linkbox(12,318,296,56,"utoggle",uplink_applying()?L("Applying","正在应用"):u->enabled?L("Turn off Wi-Fi relay","关闭 无线中继"):L("Turn on Wi-Fi relay","开启 无线中继"),
           uplink_switch_ok(),u->enabled?DANGER:PRIMARY);
-  footer(416,40,L("Manage networks in OpenUI. Shared radio may interrupt connections.","网络与密码请在 OpenUI 中管理；共享射频可能中断连接。"),"muted");
+  footer(386,40,L("Shared radio may interrupt hotspot connections.","共享射频，热点连接可能中断。"),"warn");
 }
 static void format_rate(char *buf, size_t n, unsigned long long kbps) {
   if(kbps>=100000)snprintf(buf,n,"%.0fM",(double)kbps/1000.0);
@@ -877,7 +870,7 @@ static void render_wifi_devices(void) {
   snprintf(detail,sizeof(detail),"%d / %d",wifi_offset/4+1,data.nwsta?(data.nwsta+3)/4:1);box(112,352,96,20,"muted center",detail);
   snprintf(detail,sizeof(detail),L("%d blocked","%d 台"),data.nwblk);
   nav_row(12,394,296,48,"wblocked",L("Blocked devices","已拉黑设备"),detail,"muted",1);
-  footer(448,24,pending&&pending_kind==JOB_TOOL?L("Applying…","正在应用…"):L("Kick = block, even under a new MAC","踢出即拉黑，换 MAC（同名）也会被拦"),pending?"warn":"faint");
+  footer(448,24,pending&&pending_kind==JOB_TOOL?L("Applying…","正在应用…"):"",pending?"warn":"faint");
 }
 static void render_wifi_blocked(void) {
   char title[64],id[8],tmp[32];
@@ -894,7 +887,7 @@ static void render_wifi_blocked(void) {
   linkbox(208,338,100,48,"wnext",L("Next ›","下页 ›"),wifi_offset+4<data.nwblk,PLAIN);
   snprintf(tmp,sizeof(tmp),"%d / %d",wifi_offset/4+1,data.nwblk?(data.nwblk+3)/4:1);box(112,352,96,20,"muted center",tmp);
   footer(400,48,pending&&pending_kind==JOB_TOOL?L("Applying…","正在应用…"):
-         L("Unblock also clears entries with the same name; the device can join again.","解除会一并解除同名的记录，设备可重新连接 Wi-Fi。"),pending?"warn":"muted");
+         L("Same-name entries will also be unblocked.","同名记录将一并解除。"),pending?"warn":"muted");
 }
 static void render_wifi(void) {
   if(wifi_view==1){render_wifi_devices();return;}
@@ -906,11 +899,11 @@ static void render_wifi(void) {
   add("<div class=\"box card\" style=\"left:12px;top:72px;width:296px;height:40px\"></div>");
   kv_row(82,L("Wi-Fi name","网络名称"),h->wifi_ssid[0]?h->wifi_ssid:"--","");
   if(data.nwblk)snprintf(tmp,sizeof(tmp),L("%d online · %d blocked","%d 台在线 · %d 台已拉黑"),data.nwsta,data.nwblk);
-  else snprintf(tmp,sizeof(tmp),L("%d online · tap to kick","%d 台在线 · 点击查看与踢出"),data.nwsta);
+  else snprintf(tmp,sizeof(tmp),L("%d online","%d 台在线"),data.nwsta);
   nav_row(12,120,296,52,"wclients",L("Connected devices","已连接设备"),tmp,data.nwsta?"good":"muted",1);
   section(184,L("Bands","频段"));
-  switch_row(12,208,296,60,"w2",h->wifi_2g_on?"w2off":"w2on","2.4 GHz",h->wifi_2g_on?L("On · wider range","已开启 · 覆盖更远"):L("Off","已关闭"),h->wifi_2g_on,can);
-  switch_row(12,276,296,60,"w5",h->wifi_5g_on?"w5off":"w5on","5 GHz",h->wifi_5g_on?L("On · faster nearby","已开启 · 近距离更快"):L("Off","已关闭"),h->wifi_5g_on,can);
+  switch_row(12,208,296,60,"w2",h->wifi_2g_on?"w2off":"w2on","2.4 GHz",h->wifi_2g_on?L("On","已开启"):L("Off","已关闭"),h->wifi_2g_on,can);
+  switch_row(12,276,296,60,"w5",h->wifi_5g_on?"w5off":"w5on","5 GHz",h->wifi_5g_on?L("On","已开启"):L("Off","已关闭"),h->wifi_5g_on,can);
   /* Transmit power for both bands; a level is marked only when both bands are on it. */
   static const int levels[]={100,80,50,20};
   const char *names[]={L("Max","最大"),L("High","高"),L("Mid","中"),L("Low","低")};
@@ -922,8 +915,7 @@ static void render_wifi(void) {
     int now=h->has_wifi_power&&h->wifi_pct_2g==(unsigned long long)levels[i]&&h->wifi_pct_5g==(unsigned long long)levels[i];
     linkbox(12+i*76,366,68,48,id,names[i],can&&h->has_wifi_power,now?CHOSEN:PLAIN);
   }
-  footer(422,48,pending&&pending_kind==JOB_TOOL?L("Applying Wi-Fi changes...","正在应用 Wi-Fi 设置..."):
-         L("Lower = less range and interference. No disconnects.","降低功率覆盖变小、干扰更少；设置时设备不会断开。"),pending?"warn":"muted");
+  footer(422,20,pending&&pending_kind==JOB_TOOL?L("Applying Wi-Fi changes...","正在应用 Wi-Fi 设置..."):"",pending?"warn":"muted");
 }
 /* The chart's full height: the smallest 1/2/5 step at or above the peak, at least 1 Mbit/s. */
 static unsigned long long chart_scale(const struct speed_chart *c) {
@@ -989,8 +981,7 @@ static void render_signal(void) {
   linkbox(164,322,68,48,"net2","NSA",can,is_nsa?CHOSEN:PLAIN);
   linkbox(240,322,68,48,"net3","4G",can,is_4g?CHOSEN:PLAIN);
   nav_row(12,378,296,48,"imei","IMEI / NV550",L("Guarded · explicit check","受保护 · 需手动检查"),"warn",1);
-  footer(434,40,pending&&pending_kind==JOB_TOOL?L("Switching the network mode...","正在切换网络制式..."):
-         L("Band and cell locking are in OpenUI.","锁频段与锁小区请在 OpenUI 中操作。"),pending?"warn":"muted");
+  footer(434,20,pending&&pending_kind==JOB_TOOL?L("Switching the network mode...","正在切换网络制式..."):"",pending?"warn":"muted");
 }
 /* One USB mode to pick: name (and "now" on the active one), what it is for, a radio mark.
  * Picking only marks it; Apply sends the switch. */
@@ -1040,10 +1031,10 @@ static void render_usb(void) {
   linkbox(158,334,52,48,"ttlp","+",can,PLAIN);
   linkbox(218,334,90,48,"ttlset",pending&&pending_kind==JOB_TOOL?L("Setting","应用中"):L("Set","设定"),
           can&&ttl_draft>0&&(unsigned long long)ttl_draft!=h->ttl_val,PRIMARY);
-  footer(390,80,switching?L("Switching the USB mode… USB drops for a few seconds, then reconnects with ADB.","正在切换 USB 模式… USB 会断开几秒，随后连同 ADB 一起恢复。"):
-         pending&&pending_kind==JOB_TOOL?L("Applying… USB drops for a few seconds, then reconnects with ADB.","正在应用… USB 会断开几秒，随后连同 ADB 一起恢复。"):
-         pick>=0&&pick!=cur?L("Apply switches the USB mode: USB drops for a few seconds and comes back with ADB. A reboot returns to RNDIS.","点「应用」切换：USB 断开几秒后恢复，ADB 保持可用。重启后回到 RNDIS。"):
-         L("Tap a preset, or dial a custom TTL with − / + and Set. A fixed TTL makes shared devices look like the router.","点预设，或用 − / + 调出自定义 TTL 再点「设定」。固定 TTL 可让共享设备看起来与本机相同。"),pending||switching?"warn":"muted");
+  footer(390,60,switching?L("Switching USB; connection will briefly drop.","正在切换 USB，连接会短暂断开。"):
+         pending&&pending_kind==JOB_TOOL?L("Applying…","正在应用…"):
+         pick>=0&&pick!=cur?L("USB will disconnect briefly; reboot restores RNDIS.","USB 会短暂断开；重启后恢复 RNDIS。"):
+         "",switching||pick!=cur?"warn":"muted");
 }
 static void render_power(void) {
   const struct toolbox_info *h=&data.toolbox;
@@ -1069,8 +1060,7 @@ static void render_power(void) {
   linkbox(88,286,68,52,"lim80","80%",can,lim==80?CHOSEN:PLAIN);
   linkbox(164,286,68,52,"lim90","90%",can,lim==90?CHOSEN:PLAIN);
   linkbox(240,286,68,52,"lim100","100%",can,lim>=100?CHOSEN:PLAIN);
-  footer(354,40,pending&&pending_kind==JOB_TOOL?L("Updating charging...","正在更新充电设置..."):
-         L("A limit of 80% keeps the battery cooler when always plugged in.","长期插电时，80% 上限可减少发热和电池损耗。"),pending?"warn":"muted");
+  footer(354,20,pending&&pending_kind==JOB_TOOL?L("Updating charging...","正在更新充电设置..."):"",pending?"warn":"muted");
 }
 static void render_booster(void) {
   const struct toolbox_info *h=&data.toolbox;
@@ -1086,8 +1076,7 @@ static void render_booster(void) {
   linkbox(12,222,142,48,"killbloat",L("Stop services","停止服务"),!blocked(),PRIMARY);
   linkbox(166,222,142,48,"dropcache",L("Free cache","释放缓存"),!blocked(),PLAIN);
   linkbox(12,278,296,48,"stock",L("Return to the stock UI","返回原厂界面"),1,PLAIN);
-  footer(340,100,pending&&pending_kind==JOB_TOOL?L("Freeing resources...","正在清理..."):
-         L("Stop optional vendor services or free cached memory.","可停止厂商可选服务，或释放内存缓存。"),pending?"warn":"muted");
+  footer(340,20,pending&&pending_kind==JOB_TOOL?L("Freeing resources...","正在清理..."):"",pending?"warn":"muted");
 }
 static void render_confirm(void) {
   if(confirm_what==CF_KICK) {

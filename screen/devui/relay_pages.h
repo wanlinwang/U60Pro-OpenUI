@@ -26,7 +26,7 @@ static int relay_confirm_valid(void) {
   return confirm_target==RA_SCAN||confirm_target==RA_RECONNECT||(confirm_target==RA_DISCONNECT&&data.uplink.enabled);
 }
 static void relay_warning(int y) {
-  footer(y,40,L("Shared radio: hotspot / AP clients may disconnect.","共享射频：热点 / AP 客户端可能断开。"),"warn");
+  footer(y,40,L("Shared radio: hotspot clients may disconnect.","共享射频，热点设备可能断开。"),"warn");
 }
 static void render_relay_form(void) {
   header(L("Network editor","编辑网络"));

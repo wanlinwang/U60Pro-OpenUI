@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build the DevUI renderer + OpenUI host; pinned sources, isolated native/cross objects."""
-import concurrent.futures, hashlib, json, os, pathlib, shlex, shutil, subprocess, sys, tarfile, urllib.request
+import concurrent.futures, hashlib, json, os, pathlib, shlex, shutil, subprocess, sys, tarfile, urllib.error, urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 os.chdir(ROOT)
 DEPS = ROOT / 'build/devui-deps'
@@ -9,13 +9,22 @@ PINS = {
  'litehtml': ('https://codeload.github.com/litehtml/litehtml/tar.gz/9bc84b8b8d15a4e50f18b327aa30955048b441c2', 'ff09151e75079bad74cb4f1dc5411e4cbc39452a9e86834df7c56289833dc53f'),
  'freetype': ('https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-13-3', 'bc5c898e4756d373e0d991bab053036c5eb2aa7c0d5c67e8662ddc6da40c4103'),
  'unifont': ('https://unifoundry.com/pub/unifont/unifont-17.0.05/font-builds/unifont-17.0.05.otf', '85701ab9b1e251ee16f4df00b13f22eac311d72b7dab427a7d975fe7f5064702'),
+ 'status-font': ('https://raw.githubusercontent.com/google/fonts/cc39c4c2c304bc368c9b7c311ea2bcc6013299fe/ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf', 'd7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134'),
 }
 def source(name):
  url, digest = PINS[name]
- p = DEPS / (name + ('.otf' if name == 'unifont' else '.tar.gz'))
- if not p.exists(): p.write_bytes(urllib.request.urlopen(url, timeout=60).read())
+ p = DEPS / (name + ('.otf' if name == 'unifont' else '.ttf' if name == 'status-font' else '.tar.gz'))
+ if not p.exists():
+  try: data=urllib.request.urlopen(url, timeout=60).read()
+  except (OSError, urllib.error.URLError):
+   # macOS Python installations can lack a CA bundle even while system curl
+   # has one. Keep TLS verification enabled and verify the pinned hash below.
+   curl=shutil.which('curl')
+   if not curl: raise
+   data=subprocess.run([curl,'--fail','--location','--silent','--show-error','--max-time','60',url],check=True,stdout=subprocess.PIPE).stdout
+  p.write_bytes(data)
  if hashlib.sha256(p.read_bytes()).hexdigest() != digest: raise RuntimeError(name + ' checksum mismatch')
- if name == 'unifont': return p
+ if name in ('unifont', 'status-font'): return p
  with tarfile.open(p) as t:
   top = t.getnames()[0].split('/')[0]
   if not (DEPS / top).exists():
@@ -24,7 +33,7 @@ def source(name):
      raise RuntimeError('Unsafe archive member')
    t.extractall(DEPS)
  return DEPS / top
-lh, ft, font = (source(n) for n in PINS)
+lh, ft, font, status_font = (source(n) for n in PINS)
 preview = '--preview' in sys.argv
 out = ROOT / ('build/devui-native' if preview else 'build/devui-aarch64')
 out.mkdir(parents=True, exist_ok=True)
@@ -36,6 +45,11 @@ modules = ['autofit_module_class','tt_driver_class','cff_driver_class','psaux_mo
 font_header = out / 'devui_font.h'
 if not font_header.exists():
  raw=font.read_bytes();font_header.write_text('static const unsigned char devui_font[] = {\n'+','.join(map(str,raw))+'\n};\n')
+status_header = out / 'devui_status_font.h'
+status_stamp = out / 'devui_status_font.sha256'
+if not status_header.exists() or not status_stamp.exists() or status_stamp.read_text()!=PINS['status-font'][1]:
+ raw=status_font.read_bytes();status_header.write_text('static const unsigned char devui_status_font[] = {\n'+','.join(map(str,raw))+'\n};\n')
+ status_stamp.write_text(PINS['status-font'][1])
 # HTML/CSS is compiled into the component so deployment/rollback stays one-file atomic.
 ui_header=out/'devui_assets.h'
 ui_header.write_text('\n'.join('static const char '+p.stem.replace('-','_')+'_asset[] = '+json.dumps(p.read_text())+';' for p in sorted((ROOT/'screen/devui/ui').glob('*'))))
@@ -57,7 +71,7 @@ def compile_one(job):
  command=compiler+common+flags+['-c',str(p),'-o',str(obj)]
  dep=b''
  if prefix=='app_':
-  dep=b''.join(x.read_bytes() for x in sorted((ROOT/'screen').rglob('*.h')))+ui_header.read_bytes()
+  dep=b''.join(x.read_bytes() for x in sorted((ROOT/'screen').rglob('*.h')))+ui_header.read_bytes()+PINS['unifont'][1].encode()+PINS['status-font'][1].encode()
  key=hashlib.sha256(p.read_bytes()+json.dumps(command).encode()+dep).hexdigest()
  if not obj.exists() or not stamp.exists() or stamp.read_text()!=key:
   r=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)

@@ -46,14 +46,16 @@ static void go(int p) {
 }
 static int parent(int p) {
   switch(p) {
+  case MENU: return DASHBOARD;
+  case DASHBOARD: return DASHBOARD;
   case IMEI_PAGE: return SIGNAL_PAGE;
-  case PROFILES: case DEVICES: return visible_page(WG)?WG:MENU;
+  case PROFILES: case DEVICES: return visible_page(WG)?WG:menu_origin;
   case NODES: case SUBS: case CORE: case CFOPT: return CLASH;
   case GROUP: return NODES;
-  case DIAG: return (diag_from==PROXY||diag_from==CLASH)&&reachable(diag_from)?diag_from:MENU;
-  case TAILSCALE: return ts_from==PROXY&&reachable(PROXY)?PROXY:MENU;
-  case UPLINK: return uplink_from==OVERVIEW&&reachable(OVERVIEW)?OVERVIEW:MENU;
-  default: return MENU;
+  case DIAG: return (diag_from==PROXY||diag_from==CLASH)&&reachable(diag_from)?diag_from:menu_origin;
+  case TAILSCALE: return ts_from==PROXY&&reachable(PROXY)?PROXY:menu_origin;
+  case UPLINK: return uplink_from==OVERVIEW&&reachable(OVERVIEW)?OVERVIEW:menu_origin;
+  default: return menu_origin;
   }
 }
 static void back(void) {
@@ -166,6 +168,8 @@ static void tap(int x,int y) {
   /* The Wi-Fi page's device lists step back to the list above them, not the menu. */
   if(page==WIFI_PAGE&&wifi_view&&!strcmp(a,"back")) { wifi_view=wifi_view==2?1:0;wifi_offset=0;return; }
   if(!strcmp(a,"back")) { back();return; }
+  if(!strcmp(a,"more")&&page==DASHBOARD) { go(MENU);return; }
+  if(page==DASHBOARD||page==MENU)menu_origin=page;
   static const struct { const char *id; int page; } links[]={
     {"wireguard",WG},{"overview",OVERVIEW},{"profiles",PROFILES},{"proxy",PROXY},
     {"clash",CLASH},{"sms",SMS_PAGE},{"nodes",NODES},{"subs",SUBS},{"core",CORE},{"cfopt",CFOPT},{"esim",ESIM},
