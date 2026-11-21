@@ -11,7 +11,6 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
-#include FT_MULTIPLE_MASTERS_H
 #include "devui_font.h"
 #include "devui_status_font.h"
 
@@ -75,7 +74,6 @@ static bool pt_in_round(int x, int y, int fx, int fy, int fw, int fh,
 static FT_Library g_ft;
 static FT_Face    g_face;
 static FT_Face    g_status_face;
-static bool       g_status_bold;
 
 struct ft_font { int size; int ascent, descent, height; bool bold; FT_Face face; };
 
@@ -260,7 +258,7 @@ public:
         auto *f = new ft_font();
         f->size = (int)d.size;
         f->face = d.family.find("status-sans") != std::string::npos && g_status_face ? g_status_face : g_face;
-        f->bold = d.weight >= 600 && !(f->face == g_status_face && g_status_bold);
+        f->bold = d.weight >= 600;
         FT_Set_Pixel_Sizes(f->face, 0, f->size);
         f->ascent  = f->face->size->metrics.ascender >> 6;
         f->descent = -(f->face->size->metrics.descender >> 6);
@@ -405,18 +403,7 @@ extern "C" void html_view_init(uint16_t *fb, int w, int h, int pitch_px, int rot
         fprintf(stderr, "html_view: cannot load embedded OFL font\n");
         std::abort();
     }
-    if (!FT_New_Memory_Face(g_ft, devui_status_font, sizeof(devui_status_font), 0, &g_status_face)) {
-        FT_MM_Var *axes = nullptr;
-        if (!FT_Get_MM_Var(g_status_face, &axes) && axes) {
-            std::vector<FT_Fixed> coords(axes->num_axis);
-            for (FT_UInt i=0;i<axes->num_axis;i++) {
-                coords[i]=axes->axis[i].def;
-                if (axes->axis[i].tag==FT_MAKE_TAG('w','g','h','t'))coords[i]=700L<<16;
-            }
-            g_status_bold = FT_Set_Var_Design_Coordinates(g_status_face, axes->num_axis, coords.data()) == 0;
-            FT_Done_MM_Var(g_ft, axes);
-        }
-    } else {
+    if (FT_New_Memory_Face(g_ft, devui_status_font, sizeof(devui_status_font), 0, &g_status_face)) {
         /* A status font failure must never prevent the stock screen's recovery. */
         g_status_face=nullptr;
     }

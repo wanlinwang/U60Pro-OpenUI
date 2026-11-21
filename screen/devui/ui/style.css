@@ -1,23 +1,22 @@
 * { box-sizing: border-box; }
 /* Unifont is a 16 px bitmap design: 16 and 32 px render crisp, 24 px is used only for titles.
  * Colours follow the OpenUI web panel's dark theme. */
-html, body { margin:0; padding:0; width:320px; height:480px; background:#0b0d11; color:#e8eaee; font-family: sans-serif; font-size:16px; line-height:20px; }
+html, body { margin:0; padding:0; width:320px; height:480px; background:#0b0d11; color:#e8eaee; font-family: sans-serif; font-size:16px; font-weight:normal; line-height:20px; }
 .box { position:absolute; overflow:hidden; white-space:nowrap; }
 .wrap { white-space:normal; }
 a { text-decoration:none; color:#e8eaee; }
 /* The title bar: page title and the back button. */
 .bar { background:#0b0d11; border-bottom:1px solid #20252c; }
-.btn { display:block; background:#20242a; border:1px solid #30353d; border-radius:8px; text-align:center; font-weight:bold; }
+.btn { display:block; background:#20242a; border:1px solid #30353d; border-radius:8px; text-align:center; }
 .primary { background:#2d7bd0; border-color:#4c9eeb; color:#ffffff; }
 .danger { background:#2c1519; border-color:#6b2a33; color:#ff9d9d; }
 .disabled { background:#12151b; color:#4f5662; border-color:#1c2028; }
 /* The current choice among buttons (backend, proxy mode, presets). */
 .chosen { background:#0f2a1c; border-color:#2f8a55; color:#6be39a; }
 .card { background:#191c21; border:1px solid #292d34; border-radius:9px; }
-.title { font-size:24px; line-height:32px; font-weight:bold; }
-.head { font-weight:bold; }
+.title { font-size:24px; line-height:32px; }
 .status-text { font-family:status-sans; }
-.big { font-size:32px; line-height:36px; font-weight:bold; }
+.big { font-size:32px; line-height:36px; }
 .right { text-align:right; }
 .center { text-align:center; }
 .row { display:block; background:#202329; border:1px solid #30343a; border-radius:8px; }
@@ -27,11 +26,11 @@ a { text-decoration:none; color:#e8eaee; }
 .row.off { background:#13161c; border-color:#1d2129; color:#4f5662; }
 .tile { display:block; background:#202329; border:1px solid #30343a; border-radius:8px; }
 .tile.stock { background:#1d2538; border-color:#3b4d71; }
-.icon { color:#4c9eeb; font-weight:bold; }
+.icon { color:#4c9eeb; }
 .pill { background:#1a1f28; border:1px solid #2a313d; border-radius:8px; text-align:center; }
 /* Section label above a group of controls. */
-.label { color:#9aa1ac; font-weight:bold; }
-.name { position:absolute; left:14px; top:9px; right:34px; font-weight:bold; overflow:hidden; white-space:nowrap; }
+.label { color:#9aa1ac; }
+.name { position:absolute; left:14px; top:9px; right:34px; overflow:hidden; white-space:nowrap; }
 .sub { position:absolute; left:14px; top:31px; right:34px; color:#9aa1ac; overflow:hidden; white-space:nowrap; }
 .chev { position:absolute; right:12px; top:0; color:#646c78; font-size:24px; }
 .bar-track { background:#262d38; border-radius:3px; }
@@ -40,9 +39,9 @@ a { text-decoration:none; color:#e8eaee; }
 .track { background:#2c3441; border-radius:12px; }
 .track.on { background:#2f8a55; }
 .knob { background:#e8eaee; border-radius:9px; }
-.check { border:2px solid #4a5260; border-radius:6px; text-align:center; font-weight:bold; line-height:18px; color:#0b0d11; }
+.check { border:2px solid #4a5260; border-radius:6px; text-align:center; line-height:18px; color:#0b0d11; }
 .check.on { background:#4cc97a; border-color:#4cc97a; }
-.badge { border-radius:10px; text-align:center; font-weight:bold; background:#2f8a55; color:#effff5; }
+.badge { border-radius:10px; text-align:center; background:#2f8a55; color:#effff5; }
 .line { background:#212833; }
 .shade { background:#05070a; }
 /* State colours last so they win over .sub and .row. */

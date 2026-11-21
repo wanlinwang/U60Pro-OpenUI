@@ -45,7 +45,7 @@ static void render_relay_keyboard(void) {
   linkbox(164,py?418:396,148,52,"rkdone",L("Done","完成"),1,PRIMARY);
 }
 /* Cache only public, fixed-font ASCII metrics once; no per-key FreeType measuring
- * and no credential-derived cache. Bounds include the native bold pass's +1 pixel. */
+ * and no credential-derived cache. */
 static struct {int advance,left,right;} relay_keyboard_glyph[95];
 static int relay_keyboard_glyph_ready;
 static void relay_keyboard_glyph_init(void) {
@@ -54,14 +54,16 @@ static void relay_keyboard_glyph_init(void) {
     char glyph[2]={(char)c,0};int x0,y0,x1,y1;
     relay_keyboard_glyph[c-32].advance=html_view_text_width_px(glyph,16);
     html_view_text_bounds_px(glyph,16,&x0,&y0,&x1,&y1);
-    relay_keyboard_glyph[c-32].left=x0;relay_keyboard_glyph[c-32].right=x1+1;
+    relay_keyboard_glyph[c-32].left=x0;relay_keyboard_glyph[c-32].right=x1;
   }
   relay_keyboard_glyph_ready=1;
 }
 static int relay_keyboard_text_extent(const char *value,int *left) {
   for(const unsigned char *s=(const unsigned char*)value;*s;s++)if(*s>=128) {
     int x0,y0,x1,y1;html_view_text_bounds_px(value,16,&x0,&y0,&x1,&y1);
-    if(left)*left=x0<0?x0:0;int width=html_view_text_width_px(value,16);return x1+1>width?x1+1-(x0<0?x0:0):width-(x0<0?x0:0);
+    int start=x0<0?x0:0,advance=html_view_text_width_px(value,16);
+    if(left)*left=start;
+    return (x1>advance?x1:advance)-start;
   }
   int pen=0,min=0,max=0;relay_keyboard_glyph_init();
   for(const unsigned char *s=(const unsigned char *)value;*s;s++) {
@@ -93,7 +95,7 @@ static void relay_keyboard_paint(uint16_t *target) {
   int inline_sms=sms_keyboard_inline(),x=12,y=inline_sms?214:72,width=inline_sms?168:296;
   html_view_fill_rect(x,y,width,inline_sms?44:64,11,13,17,255);
   int left=0;relay_keyboard_text_extent(value,&left);
-  html_view_draw_text_px(x-left,y,value,16,1,232,234,238,255);
+  html_view_draw_text_px(x-left,y,value,16,0,232,234,238,255);
   int count_y=inline_sms?y+22:106;
   if(relay_edit.overflow)html_view_draw_text_px(x,count_y,count,16,0,240,106,106,255);
   else html_view_draw_text_px(x,count_y,count,16,0,154,161,172,255);

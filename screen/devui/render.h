@@ -85,7 +85,7 @@ static void compact_linkbox(int x, int y, int w, int h, const char *id,
 static void linkbox(int x, int y, int w, int h, const char *id, const char *label, int enabled, int tone) {
   compact_linkbox(x,y,w,h,id,label,enabled,tone,16);
 }
-/* A tappable list row: bold title, muted detail line and a chevron. */
+/* A tappable list row: title, muted detail line and a chevron. */
 static void open_row(int x, int y, int w, int h, const char *id, int enabled, const char *extra) {
   add("<a id=\"%s\" href=\"act:%s\" class=\"box row %s\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx\">",id,enabled?id:"none",enabled?extra:"off",x,y,w,h);
 }
@@ -171,7 +171,7 @@ static void header_battery(int x,int y) {
   rect(x+31,y+5,2,7,"",outline);
   char label[24];if(data.battery<0)snprintf(label,sizeof(label),"--");
   else snprintf(label,sizeof(label),"%d",percent);
-  add("<div id=\"battery-level\" class=\"box head center status-text\" style=\"left:%dpx;top:%dpx;width:24px;height:13px;font-size:10px;line-height:13px;color:%s\">",x+3,y+2,known?"#101216":"#e8eaee");
+  add("<div id=\"battery-level\" class=\"box center status-text\" style=\"left:%dpx;top:%dpx;width:24px;height:13px;font-size:9px;line-height:13px;color:%s\">",x+3,y+2,known?"#101216":"#e8eaee");
   escaped(label);add("</div>");
 }
 /* Small stepped curves, so Wi-Fi resembles the reference at 320 x 480. */
@@ -214,7 +214,7 @@ static const char *status_radio(const char *radio,int has_sim) {
 static void top_status(void) {
   char clock[8];status_clock(clock,time(NULL),10000);
   rect(0,0,W,40,"","#000000");
-  add("<div class=\"box head status-text\" style=\"left:10px;top:7px;width:72px;height:24px;font-size:18px;line-height:24px;color:#ffffff\">");
+  add("<div class=\"box status-text\" style=\"left:10px;top:7px;width:72px;height:24px;font-size:16px;line-height:24px;color:#ffffff\">");
   escaped(clock);add("</div>");
   const struct toolbox_info *tb=&data.toolbox;
   int known=tb->has&&!stale(),has_sim=known&&tb->sim!=0;
@@ -227,7 +227,7 @@ static void top_status(void) {
   for(int i=0;i<4;i++)add("<div class=\"box\" style=\"left:%dpx;top:%dpx;width:%dpx;height:%dpx;border-radius:1px;background:%s\"></div>",
       182+shift+i*7,27-heights[i],widths[i],heights[i],i<lit?"#ffffff":"#3a414b");
   const char *radio=status_radio(tb->radio,has_sim);
-  add("<div class=\"box head status-text\" style=\"left:%dpx;top:7px;width:22px;height:24px;font-size:18px;line-height:24px;color:%s\">",210+shift,strcmp(radio,"--")?"#ffffff":"#9aa1ac");
+  add("<div class=\"box status-text\" style=\"left:%dpx;top:7px;width:22px;height:24px;font-size:16px;line-height:24px;color:%s\">",210+shift,strcmp(radio,"--")?"#ffffff":"#9aa1ac");
   escaped(radio);add("</div>");
   status_wifi(235+shift,10,known&&(tb->wifi_2g_on||tb->wifi_5g_on));
   header_battery(262+shift,10);
